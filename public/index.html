@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>JL Setters — Live Dashboard</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --brand-bg: #050505;
+    --brand-surface: #121212;
+    --brand-surface-2: #1a1a1a;
+    --brand-border: rgba(255, 255, 255, 0.09);
+    --brand-border-strong: rgba(255, 255, 255, 0.22);
+    --w-1: #ffffff; --w-2: #d9d9d9; --w-3: #adadad;
+    --w-gradient: linear-gradient(180deg, var(--w-1) 0%, var(--w-2) 55%, var(--w-3) 100%);
+    --w-gradient-h: linear-gradient(90deg, transparent, var(--w-2) 25%, var(--w-1) 50%, var(--w-2) 75%, transparent);
+    --blue: #6fa8ff; --pink: #ff8fc6; --affiliate: #f0b429;
+    --red: #e2665f; --amber: #f0b429; --green: #6fcf97;
+    --text: #f5f5f5; --text-dim: #a8a8a8; --text-faint: #6b6b6b;
+    --font-heading: 'Playfair Display', Georgia, serif;
+    --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--brand-bg); color: var(--text); font-family: var(--font-body); }
+  a { color: inherit; }
+
+  .app-shell { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 232px; flex-shrink: 0; background: var(--brand-surface); border-right: 1px solid var(--brand-border);
+    padding: 22px 14px 40px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  .sidebar-brand { padding: 0 8px 20px; }
+  .sidebar-brand .name { font-family: var(--font-heading); font-weight: 700; font-size: 18px; }
+  .sidebar-brand .sub { color: var(--green); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; margin-top: 2px; }
+  .nav-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); font-weight: 700; margin: 20px 0 6px; padding: 0 8px; }
+  .nav-label:first-of-type { margin-top: 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-radius: 8px; font-size: 13px;
+    color: var(--text-dim); cursor: pointer; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; font-family: var(--font-body);
+  }
+  .nav-item:hover { background: var(--brand-surface-2); color: var(--text); }
+  .nav-item.active { background: var(--brand-surface-2); color: var(--text); font-weight: 700; }
+  .nav-item .bar { width: 3px; height: 15px; border-radius: 2px; background: var(--text-faint); flex-shrink: 0; }
+  .nav-item.blue .bar { background: var(--blue); }
+  .nav-item.pink .bar { background: var(--pink); }
+  .nav-item.affiliate .bar { background: var(--affiliate); }
+  .nav-item .soon { margin-left: auto; font-size: 8.5px; padding: 2px 6px; border-radius: 4px; background: var(--brand-bg); color: var(--text-faint); border: 1px solid var(--brand-border); }
+  .nav-item.disabled { opacity: 0.4; cursor: default; }
+  .affiliate-toggle-wrap { margin: 22px 8px 0; padding-top: 16px; border-top: 1px solid var(--brand-border); display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-dim); }
+  .switch { position: relative; width: 36px; height: 20px; background: var(--brand-surface-2); border-radius: 999px; cursor: pointer; border: 1px solid var(--brand-border-strong); }
+  .switch .knob { position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 50%; background: var(--text-faint); transition: transform 0.15s ease, background 0.15s ease; }
+  .switch.on { background: rgba(111,207,151,0.18); border-color: var(--green); }
+  .switch.on .knob { transform: translateX(16px); background: var(--green); }
+
+  .main-content { flex: 1; min-width: 0; padding: 22px clamp(16px, 3vw, 44px) 60px; }
+  @media (max-width: 860px) { .app-shell { flex-direction: column; } .sidebar { width: 100%; height: auto; position: relative; } }
+
+  .top-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .live-pill { display: flex; align-items: center; gap: 8px; background: var(--brand-surface); border: 1px solid var(--brand-border); padding: 8px 14px; border-radius: 999px; font-size: 12px; color: var(--text-dim); }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(111,207,151,0.6); animation: pulse 2s infinite; }
+  .live-dot.stale { background: var(--red); animation: none; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(111,207,151,0.5);} 70%{box-shadow:0 0 0 7px rgba(111,207,151,0);} 100%{box-shadow:0 0 0 0 rgba(111,207,151,0);} }
+  .refresh-btn { font-size: 12px; padding: 8px 14px; border: 1px solid var(--brand-border-strong); border-radius: 999px; cursor: pointer; background: var(--brand-surface); color: var(--text-dim); }
+  .refresh-btn:hover { color: var(--text); border-color: var(--w-2); }
+
+  .period-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .pill-btn { background: var(--brand-surface); border: 1px solid var(--brand-border); color: var(--text-dim); padding: 7px 14px; border-radius: 999px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .pill-btn:hover { border-color: var(--w-2); color: var(--text); }
+  .pill-btn.active { background: var(--w-gradient); border-color: transparent; color: #0a0a0a; font-weight: 700; }
+  select.period-select, .date-inputs input { background: var(--brand-surface); border: 1px solid var(--brand-border-strong); color: var(--text); border-radius: 8px; padding: 7px 10px; font-family: var(--font-body); font-size: 12px; color-scheme: dark; }
+  .date-inputs { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .date-inputs span { color: var(--text-faint); font-size: 12px; }
+  .range-caption { color: var(--text-dim); font-size: 12.5px; margin: 4px 0 20px; }
+
+  .view-head h1 { font-family: var(--font-heading); font-size: 24px; margin: 0; }
+  .view-head .sub { color: var(--text-dim); font-size: 12.5px; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .card { position: relative; overflow: hidden; background: var(--brand-surface); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius); box-shadow: 0 22px 44px -28px rgba(0,0,0,0.9); }
+  .card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--w-gradient-h); opacity: 0.6; }
+
+  .section-h { font-family: var(--font-heading); font-weight: 700; font-size: 15px; margin: 30px 0 12px; color: var(--text); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .section-h .hint { font-family: var(--font-body); font-size: 11px; color: var(--text-faint); font-weight: 500; }
+
+  .hero-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+  .hero-card { padding: 16px 16px 14px; }
+  .hero-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint); margin-bottom: 8px; }
+  .hero-value { font-family: var(--font-heading); font-size: 26px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+  .rag-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .rag-red { color: var(--red); } .rag-red-dot { background: var(--red); }
+  .rag-amber { color: var(--amber); } .rag-amber-dot { background: var(--amber); }
+  .rag-green { color: var(--green); } .rag-green-dot { background: var(--green); }
+
+  .person-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .person-card { padding: 16px 18px; }
+  .person-card .head { font-family: var(--font-heading); font-weight: 700; font-size: 14px; margin-bottom: 10px; padding-bottom: 8px; border-left: 3px solid var(--w-2); padding-left: 8px; }
+  .person-card.blue .head { border-color: var(--blue); }
+  .person-card.pink .head { border-color: var(--pink); }
+  .person-card.affiliate .head { border-color: var(--affiliate); }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-row .n { color: var(--text-dim); }
+  .stat-row .v { font-weight: 700; display: flex; align-items: center; gap: 5px; }
+
+  .funnel-card, .adspend-card { padding: 18px 20px; margin-bottom: 14px; }
+  .funnel-card .chips, .adspend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 10px; }
+  .chip-stat .lbl { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+  .chip-stat .val { font-family: var(--font-heading); font-size: 19px; font-weight: 700; margin-top: 3px; display: flex; align-items: center; gap: 5px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 8px 7px; }
+  thead th { color: var(--text-faint); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--brand-border); white-space: nowrap; cursor: pointer; }
+  thead th:hover { color: var(--w-1); }
+  tbody tr { border-bottom: 1px solid rgba(255,255,255,0.035); }
+  tbody tr:hover { background: var(--brand-surface-2); }
+  tbody tr.top-row td:first-child { color: var(--w-1); font-weight: 700; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .medal { margin-right: 4px; }
+  .rate-bar { flex: 1; height: 5px; border-radius: 4px; background: var(--brand-surface-2); overflow: hidden; }
+  .rate-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--w-3), var(--w-1)); }
+
+  .panel-grid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 900px) { .panel-grid { grid-template-columns: 1fr; } }
+  .panel { padding: 18px 20px 20px; }
+  .panel h3 { font-family: var(--font-heading); font-size: 13.5px; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .panel h3 .hint { font-family: var(--font-body); font-size: 10.5px; color: var(--text-faint); font-weight: 500; }
+  canvas { width: 100%; display: block; }
+
+  .empty-state { color: var(--text-faint); font-size: 12.5px; padding: 20px 0; text-align: center; }
+  .not-connected { color: var(--text-faint); font-size: 12.5px; padding: 16px 0; }
+  footer { margin-top: 26px; text-align: center; color: var(--text-faint); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand"><div class="name">JL Setters</div><div class="sub">LIVE DASHBOARD</div></div>
+    <div id="navWrap"></div>
+    <div class="affiliate-toggle-wrap">
+      <span>Affiliates</span>
+      <div class="switch on" id="affiliateSwitch"><div class="knob"></div></div>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <div class="top-row">
+      <div class="live-pill"><span class="live-dot" id="liveDot"></span><span id="liveLabel">Live · click Refresh to update</span></div>
+      <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
+    </div>
+
+    <div class="period-bar" id="periodBar"></div>
+    <div class="date-inputs" id="dropdownWrap" style="display:none;"></div>
+    <div class="date-inputs" id="customRangeWrap" style="display:none;">
+      <span>From</span><input type="date" id="customStart" min="2026-04-30">
+      <span>To</span><input type="date" id="customEnd" min="2026-04-30">
+    </div>
+    <div class="range-caption" id="rangeCaption"></div>
+
+    <div class="view-head">
+      <h1 id="viewTitle">JL Setters Overview</h1>
+      <div class="sub" id="viewSub"></div>
+    </div>
+
+    <div class="hero-grid" id="heroGrid"></div>
+
+    <div id="disabledNote" style="display:none;" class="empty-state">This view is coming soon — no Pink Affiliate data source exists yet.</div>
+
+    <div id="viewBody"></div>
+
+    <footer id="footer">Loading…</footer>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG
+   ============================================================ */
+const RANGE_FLOOR = '2026-04-30';
+const PALETTE = ['#ffffff', '#d9d9d9', '#adadad', '#7d7d7d', '#565656', '#3d3d3d', '#f0b429', '#6fa8ff'];
+
+const RAG = {
+  dmConvo: { red: 3, amber: 8 },
+  convoToCall: { red: 2, amber: 5 },
+  showPct: { red: 65, amber: 80 },
+  closePct: { red: 35, amber: 50 },
+  pickupPct: { red: 15, amber: 30 },
+  coldBookingPct: { red: 1.5, amber: 3.5 },
+  vslBookingPct: { red: 15, amber: 35 },
+};
+function ragLevel(v, key) {
+  const t = RAG[key];
+  if (!t || v === null || v === undefined || isNaN(v)) return '';
+  if (v < t.red) return 'red';
+  if (v <= t.amber) return 'amber';
+  return 'green';
+}
+function ragHtml(v, key, formatted) {
+  const lvl = ragLevel(v, key);
+  if (!lvl) return `<span>${formatted}</span>`;
+  return `<span class="rag-${lvl}">${formatted}</span><span class="rag-dot rag-${lvl}-dot"></span>`;
+}
+
+const AFFILIATE_CODES = { amir: 'Amir', luca: 'Luca', quique: 'Quique', ivan: 'Ivan', jun: 'Jun', ray: 'Ray' };
+
+const EVENT_TYPE_MAP = {
+  'jl setters discovery call': { stream: 'blueB2C', closer: 'lewis', label: 'Lewis' },
+  'jl setters - 1-1 discovery call': { stream: 'blueB2C', closer: 'jack', label: 'Jack' },
+  'jl setters - discovery call': { stream: 'blueAffiliateB2C', closer: null, label: 'Affiliate (untagged)' },
+  'jl agency: discovery call': { stream: 'blueAgency', closer: 'lewis', label: 'Lewis' },
+  'jl agency: 1-1 discovery call': { stream: 'blueAgency', closer: 'jack', label: 'Jack' },
+  'jl setters discovery call 1-1': { stream: 'blueAgency', closer: null, label: 'VSL' },
+  'jlsetters discovery 1-1 call': { stream: 'pinkB2C', closer: 'poppy', label: 'Poppy' },
+  'jlagency discovery call': { stream: 'pinkAgency', closer: 'poppy', label: 'Poppy' },
+};
+
+// Meta campaign-name -> stream. Longest/most-specific first. Note the
+// (?:[_\s-]|$) terminator — NOT \b, since "_" is a word character and \b
+// won't match the boundary between "C" and "_" in e.g. "BLUE_B2C_...".
+const STREAM_PATTERNS = [
+  { stream: 'blueAffiliateB2C', re: /^BLUE[_\s-]+(AFFILIATE|AFF)[_\s-]+B2C(?:[_\s-]|$)/i },
+  { stream: 'blueAffiliateAgency', re: /^BLUE[_\s-]+(AFFILIATE|AFF)[_\s-]+AGENCY(?:[_\s-]|$)/i },
+  { stream: 'pinkAffiliateB2C', re: /^PINK[_\s-]+(AFFILIATE|AFF)[_\s-]+B2C(?:[_\s-]|$)/i },
+  { stream: 'pinkAffiliateAgency', re: /^PINK[_\s-]+(AFFILIATE|AFF)[_\s-]+AGENCY(?:[_\s-]|$)/i },
+  { stream: 'blueB2C', re: /^BLUE[_\s-]+B2C(?:[_\s-]|$)/i },
+  { stream: 'blueAgency', re: /^BLUE[_\s-]+AGENCY(?:[_\s-]|$)/i },
+  { stream: 'pinkB2C', re: /^PINK[_\s-]+B2C(?:[_\s-]|$)/i },
+  { stream: 'pinkAgency', re: /^PINK[_\s-]+AGENCY(?:[_\s-]|$)/i },
+  // Verified live: a separate "JL Agency" ad account runs campaigns literally
+  // named "JL_AGENCY_" — doesn't match Blue/Pink Agency patterns above.
+  // Attributed to blueAgency as a default (same team as Jack/Lewis) — confirm.
+  { stream: 'blueAgency', re: /^JL[_\s-]+AGENCY(?:[_\s-]|$)/i },
+];
+function matchStream(name) {
+  for (const p of STREAM_PATTERNS) if (p.re.test(name || '')) return p.stream;
+  return null;
+}
+
+const VIEWS = [
+  { key: 'overview', section: 'OVERVIEW', label: 'JL Setters Overview', cls: '', streams: null, showDialler: true },
+  { key: 'blueOverview', section: 'BLUE', label: 'Blue Overview', cls: 'blue', streams: ['blueB2C', 'blueAgency', 'blueAffiliateB2C', 'blueAffiliateAgency'], showDialler: true },
+  { key: 'blueB2C', section: 'BLUE', label: 'Blue B2C', cls: 'blue', streams: ['blueB2C'] },
+  { key: 'blueAgency', section: 'BLUE', label: 'Blue Agency', cls: 'blue', streams: ['blueAgency'], showDialler: true },
+  { key: 'pinkOverview', section: 'PINK', label: 'Pink Overview', cls: 'pink', streams: ['pinkB2C', 'pinkAgency', 'pinkAffiliateB2C', 'pinkAffiliateAgency'] },
+  { key: 'pinkB2C', section: 'PINK', label: 'Pink B2C', cls: 'pink', streams: ['pinkB2C'] },
+  { key: 'pinkAgency', section: 'PINK', label: 'Pink Agency', cls: 'pink', streams: ['pinkAgency'] },
+  { key: 'affiliatesAll', section: 'AFFILIATES', label: 'Overall Affiliates', cls: 'affiliate', streams: ['blueAffiliateB2C', 'blueAffiliateAgency', 'pinkAffiliateB2C', 'pinkAffiliateAgency'], affiliateView: true },
+  { key: 'blueAffiliates', section: 'AFFILIATES', label: 'Blue Affiliates', cls: 'affiliate', streams: ['blueAffiliateB2C', 'blueAffiliateAgency'], affiliateView: true },
+  { key: 'pinkAffiliates', section: 'AFFILIATES', label: 'Pink Affiliates', cls: 'affiliate', streams: ['pinkAffiliateB2C', 'pinkAffiliateAgency'], affiliateView: true, disabled: true },
+];
+const PERIODS = ['Day', '7D', '30D', 'Month', '3M', '6M', '9M', '12M', 'Custom'];
+
+let state = {
+  rows: [], dialler: [], calendly: [], adSpend: { connected: false, byStream: {}, untagged: 0, daily: [] },
+  fetchedAt: null,
+  viewKey: 'overview',
+  affiliatesOn: true,
+  period: '30D', selDay: null, selMonth: null,
+  customStart: null, customEnd: null,
+  leaderboardSort: { key: 'booked', dir: 'desc' },
+};
+
+/* ============================================================
+   FORMATTING + PARSING HELPERS
+   ============================================================ */
+function fmt(n) { if (n === null || n === undefined || isNaN(n)) return '—'; return Math.round(n).toLocaleString(); }
+function pct(n) { if (n === null || n === undefined || !isFinite(n) || isNaN(n)) return '—'; return n.toFixed(1) + '%'; }
+function gbp(n) { if (n === null || n === undefined || isNaN(n)) return '—'; return '£' + Math.round(n).toLocaleString(); }
+function roas(n) { if (n === null || n === undefined || !isFinite(n) || isNaN(n)) return '—'; return n.toFixed(2) + 'x'; }
+function num(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const cleaned = String(v).replace(/[£$€,]/g, '').replace(/ /g, ' ').trim();
+  const f = parseFloat(cleaned);
+  return isNaN(f) ? null : f;
+}
+function toISO(d) { return d.toISOString().slice(0, 10); }
+function parseUKDate(str) {
+  if (!str) return null;
+  const datePart = String(str).trim().split(' ')[0];
+  const parts = datePart.split('/');
+  if (parts.length !== 3) return null;
+  let [d, m, y] = parts; if (!d || !m || !y) return null;
+  if (y.length === 2) y = '20' + y;
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+function parseFlexDate(str) {
+  const uk = parseUKDate(str);
+  if (uk) return uk;
+  const s = String(str || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const d = new Date(s);
+  return isNaN(d) ? null : toISO(d);
+}
+function inRange(dateStr, start, end) { return !!dateStr && dateStr >= start && dateStr <= end; }
+function daysBetween(start, end) { const s = new Date(start + 'T00:00:00'), e = new Date(end + 'T00:00:00'); return Math.round((e - s) / 86400000) + 1; }
+
+// §3.1 submitter classification — normalise apostrophes, priority order.
+function classifySubmitter(raw) {
+  const s = String(raw || '').replace(/[’'`]/g, '').trim().toLowerCase();
+  if (s.includes('affiliate') || s.includes('(aff)') || s.includes(' aff)')) return { person: 'affiliate', display: 'Affiliate Data' };
+  if (s.includes('jacks setter') || s.includes('jack setter') || s.includes('jg setter')) return { person: 'jack', display: "Jack's Setter" };
+  if (s.includes('lewiss setter') || s.includes('lewis setter') || s.includes('ls setter')) return { person: 'lewis', display: "Lewis' Setter" };
+  if (s.includes('poppys setter') || s.includes('poppy setter')) return { person: 'poppy', display: "Poppy's Setter" };
+  if (s.includes('jack glover')) return { person: 'jack', display: 'Jack Glover' };
+  if (s.includes('lewis sheehy')) return { person: 'lewis', display: 'Lewis Sheehy' };
+  if (s.includes('poppy daniels') || s.includes('poppy')) return { person: 'poppy', display: 'Poppy Daniels' };
+  return { person: null, display: raw ? String(raw).trim() : 'Unknown' };
+}
+function extractAffiliateName(raw) {
+  const m = String(raw || '').match(/^(.+?)[’']?s?\s+Setter/i);
+  return (m ? m[1] : String(raw || '')).trim() || 'Unknown';
+}
+
+/* ============================================================
+   §2.1/§2.2/§2.3 — wide-format sheet unpivoter (shared by Blue,
+   Pink, and Affiliates; column config differs per sheet). Column
+   presence decides emission — NOT the submitter's declared role —
+   so a row that happens to have both setter- and closer-side data
+   filled in produces both kinds of stream-rows.
+   ============================================================ */
+function unpivotWideRow(r, cfg, personOverride) {
+  const date = parseUKDate(r[2]);
+  if (!date || date < RANGE_FLOOR) return [];
+  const cls = personOverride ? personOverride(r) : classifySubmitter(r[1]);
+  const out = [];
+
+  const activeBookings = cfg.bookingBlocks
+    .map(b => ({ stream: b.stream, unq: num(r[b.unqCol]) || 0, ql: num(r[b.qlCol]) || 0 }))
+    .filter(b => b.unq || b.ql);
+  const hasWideContext = ['follows', 'inbound', 'qls', 'dms', 'convos'].some((_, i) => (num(r[3 + i]) || 0) > 0);
+  if (activeBookings.length || hasWideContext) {
+    const streams = activeBookings.length ? activeBookings : [{ stream: cfg.bookingBlocks[0].stream, unq: 0, ql: 0 }];
+    streams.forEach((b, i) => {
+      out.push({
+        date, stream: b.stream, kind: 'setter', person: cls.person, displayName: cls.display,
+        affiliateName: cls.affiliateName || null,
+        follows: i === 0 ? (num(r[3]) || 0) : 0,
+        inboundLeads: i === 0 ? (num(r[4]) || 0) : 0,
+        qls: i === 0 ? (num(r[5]) || 0) : 0,
+        dms: i === 0 ? (num(r[6]) || 0) : 0,
+        convos: i === 0 ? (num(r[7]) || 0) : 0,
+        unqBooked: b.unq, qlBooked: b.ql,
+        callsTaken: 0, callsClosed: 0, cashCollected: 0, revenue: 0,
+      });
+    });
+  }
+
+  cfg.closerBlocks.forEach(b => {
+    const [ti, ci, ki, ri] = b.idx;
+    const taken = num(r[ti]) || 0, closed = num(r[ci]) || 0, cash = num(r[ki]) || 0, rev = num(r[ri]) || 0;
+    if (taken || closed || cash || rev) {
+      out.push({
+        date, stream: b.stream, kind: 'closer', person: cls.person, displayName: cls.display,
+        follows: 0, inboundLeads: 0, qls: 0, dms: 0, convos: 0, unqBooked: 0, qlBooked: 0,
+        callsTaken: taken, callsClosed: closed, cashCollected: cash, revenue: rev,
+      });
+    }
+  });
+  return out;
+}
+
+const BLUE_CFG = {
+  bookingBlocks: [{ stream: 'blueB2C', unqCol: 8, qlCol: 9 }, { stream: 'blueAgency', unqCol: 34, qlCol: 35 }],
+  closerBlocks: [
+    { stream: 'blueB2C', idx: [10, 11, 12, 13] },
+    { stream: 'blueAgency', idx: [14, 15, 16, 17] },
+    { stream: 'blueAffiliateB2C', idx: [18, 19, 20, 21] },
+    { stream: 'blueAffiliateAgency', idx: [22, 23, 24, 25] },
+    { stream: 'pinkB2C', idx: [26, 27, 28, 29] },
+    { stream: 'pinkAgency', idx: [30, 31, 32, 33] },
+  ],
+};
+const PINK_CFG = {
+  bookingBlocks: [{ stream: 'pinkB2C', unqCol: 8, qlCol: 9 }, { stream: 'pinkAgency', unqCol: 18, qlCol: 19 }],
+  closerBlocks: [{ stream: 'pinkB2C', idx: [10, 11, 12, 13] }, { stream: 'pinkAgency', idx: [14, 15, 16, 17] }],
+};
+const AFFILIATE_CFG = {
+  bookingBlocks: [{ stream: 'blueAffiliateB2C', unqCol: 8, qlCol: 9 }, { stream: 'blueAffiliateAgency', unqCol: 10, qlCol: 11 }],
+  closerBlocks: [],
+};
+
+function parseBlueRows(rows) { return rows.slice(1).flatMap(r => unpivotWideRow(r, BLUE_CFG)); }
+function parsePinkRows(rows) { return rows.slice(1).flatMap(r => unpivotWideRow(r, PINK_CFG)); }
+function parseAffiliateRows(rows) {
+  return rows.slice(1).flatMap(r => unpivotWideRow(r, AFFILIATE_CFG, row => {
+    const name = extractAffiliateName(row[1]);
+    return { person: 'affiliate', display: name, affiliateName: name };
+  }));
+}
+
+/* ============================================================
+   §2.5 Dialler EoD parser
+   ============================================================ */
+function parseDiallerRows(rows) {
+  return rows.slice(1).map(r => {
+    const date = parseUKDate(r[2]);
+    if (!date || date < RANGE_FLOOR) return null;
+    return {
+      date, dials: num(r[3]) || 0, pickUps: num(r[4]) || 0, voicemails: num(r[5]) || 0, noAnswers: num(r[6]) || 0,
+      cold1st: num(r[7]) || 0, cold2nd: num(r[8]) || 0, coldNotInterested: num(r[9]) || 0, coldBooked: num(r[10]) || 0,
+      vslCalled: num(r[11]) || 0, vslUnqualified: num(r[12]) || 0, vsl1stMissed: num(r[13]) || 0, vsl2ndMissed: num(r[14]) || 0,
+      vslBooked: num(r[15]) || 0, totalCallsBooked: num(r[16]) || 0, whatsappGroups: num(r[17]) || 0, noShowsRebooked: num(r[18]) || 0,
+    };
+  }).filter(Boolean);
+}
+
+/* ============================================================
+   §2.4 Calendly parser
+   ============================================================ */
+function normEventType(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+function parseCalendlyRows(rows) {
+  return rows.slice(1).map(r => {
+    const date = parseFlexDate(r[0]);
+    if (!date || date < RANGE_FLOOR) return null;
+    const status = String(r[7] || '').trim().toLowerCase();
+    if (status === 'cancelled' || status === 'canceled') return null;
+    const utmSource = String(r[4] || '').trim();
+    const eventType = String(r[1] || '').trim();
+    if (utmSource) {
+      const name = AFFILIATE_CODES[utmSource.toLowerCase()] || utmSource;
+      const stream = /agency/i.test(eventType) ? 'blueAffiliateAgency' : 'blueAffiliateB2C';
+      return { date, stream, closer: null, sourceLabel: name, eventType };
+    }
+    const mapped = EVENT_TYPE_MAP[normEventType(eventType)];
+    if (!mapped) return { date, stream: null, closer: null, sourceLabel: 'Unmapped: ' + (eventType || '—'), eventType };
+    return { date, stream: mapped.stream, closer: mapped.closer, sourceLabel: mapped.label, eventType };
+  }).filter(Boolean);
+}
+
+/* ============================================================
+   §2.6 Meta ad spend
+   ============================================================ */
+function parseAdSpend(adSpendPayload) {
+  if (!adSpendPayload || !adSpendPayload.connected) return { connected: false, byStream: {}, untagged: 0, daily: [] };
+  const byStream = {}; let untagged = 0; const daily = [];
+  (adSpendPayload.rows || []).forEach(r => {
+    if (!r.date || r.date < RANGE_FLOOR) return;
+    const stream = matchStream(r.campaign);
+    const spend = num(r.spend) || 0;
+    if (!stream) { untagged += spend; return; }
+    byStream[stream] = (byStream[stream] || 0) + spend;
+    daily.push({ date: r.date, stream, spend });
+  });
+  return { connected: true, byStream, untagged, daily };
+}
+
+/* ============================================================
+   FETCH
+   ============================================================ */
+async function fetchData() {
+  try {
+    const res = await fetch('/api/data', { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+
+    state.rows = [...parseBlueRows(data.blue || []), ...parsePinkRows(data.pink || []), ...parseAffiliateRows(data.affiliates || [])];
+    state.dialler = parseDiallerRows(data.agency || []);
+    state.calendly = parseCalendlyRows(data.calendly || []);
+    state.adSpend = parseAdSpend(data.adSpend);
+    state.fetchedAt = new Date(data.fetchedAt);
+
+    setLive(true);
+    render();
+  } catch (err) {
+    setLive(false, err.message);
+  }
+}
+function setLive(ok, message) {
+  const dot = document.getElementById('liveDot'); const label = document.getElementById('liveLabel');
+  if (ok) { dot.classList.remove('stale'); label.textContent = 'Live · ' + state.rows.length + ' rows'; }
+  else { dot.classList.add('stale'); label.textContent = 'Connection issue'; document.getElementById('footer').textContent = 'Error: ' + message; }
+}
+
+/* ============================================================
+   TIME PERIOD
+   ============================================================ */
+function allDates() { return [...new Set(state.rows.map(r => r.date))].sort(); }
+function allMonths() { return [...new Set(allDates().map(d => d.slice(0, 7)))].sort(); }
+function currentRange() {
+  const dates = allDates();
+  const today = dates.length ? dates[dates.length - 1] : toISO(new Date());
+  const todayD = new Date(today + 'T00:00:00');
+  if (state.period === 'Day') { const d = state.selDay || today; return { start: d, end: d }; }
+  if (state.period === '7D') { const s = new Date(todayD); s.setDate(s.getDate() - 6); return { start: toISO(s), end: today }; }
+  if (state.period === '30D') { const s = new Date(todayD); s.setDate(s.getDate() - 29); return { start: toISO(s), end: today }; }
+  if (state.period === 'Month') { const m = state.selMonth || (allMonths().slice(-1)[0] || today.slice(0, 7)); return { start: m + '-01', end: today.slice(0, 7) === m ? today : new Date(new Date(m + '-01').getFullYear(), new Date(m + '-01').getMonth() + 1, 0).toISOString().slice(0, 10) }; }
+  if (['3M', '6M', '9M', '12M'].includes(state.period)) {
+    const months = { '3M': 3, '6M': 6, '9M': 9, '12M': 12 }[state.period];
+    const s = new Date(todayD); s.setMonth(s.getMonth() - months); s.setDate(s.getDate() + 1);
+    return { start: toISO(s) < RANGE_FLOOR ? RANGE_FLOOR : toISO(s), end: today };
+  }
+  if (state.period === 'Custom') return { start: state.customStart || RANGE_FLOOR, end: state.customEnd || today };
+  const s = new Date(todayD); s.setDate(s.getDate() - 29); return { start: toISO(s), end: today };
+}
+function rangeLabel(start, end) {
+  const fmtD = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return start === end ? fmtD(start) : `${fmtD(start)} – ${fmtD(end)}`;
+}
+function buildBuckets(start, end) {
+  const startD = new Date(start + 'T00:00:00'); const endD = new Date(end + 'T00:00:00');
+  const spanDays = daysBetween(start, end); const buckets = [];
+  if (spanDays <= 31) { for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) { const iso = toISO(d); buckets.push({ label: iso.slice(5), start: iso, end: iso }); } }
+  else if (spanDays <= 120) { let cur = new Date(startD); while (cur <= endD) { const bS = new Date(cur); const bE = new Date(cur); bE.setDate(bE.getDate() + 6); const aE = bE > endD ? endD : bE; buckets.push({ label: toISO(bS).slice(5), start: toISO(bS), end: toISO(aE) }); cur.setDate(cur.getDate() + 7); } }
+  else { let cur = new Date(startD.getFullYear(), startD.getMonth(), 1); while (cur <= endD) { const bS = cur > startD ? cur : startD; const mE = new Date(cur.getFullYear(), cur.getMonth() + 1, 0); const bE = mE > endD ? endD : mE; buckets.push({ label: cur.toLocaleDateString('en-GB', { month: 'short' }), start: toISO(bS), end: toISO(bE) }); cur.setMonth(cur.getMonth() + 1); } }
+  return buckets;
+}
+
+/* ============================================================
+   AGGREGATION — filter rows for the current view + range + toggle
+   ============================================================ */
+function currentView() { return VIEWS.find(v => v.key === state.viewKey) || VIEWS[0]; }
+function filterRows(rows, view, range) {
+  let recs = rows.filter(r => inRange(r.date, range.start, range.end));
+  if (view.streams) recs = recs.filter(r => view.streams.includes(r.stream));
+  if (!view.affiliateView && !state.affiliatesOn) recs = recs.filter(r => r.person !== 'affiliate');
+  return recs;
+}
+function totals(recs) {
+  return recs.reduce((a, r) => {
+    a.follows += r.follows; a.inboundLeads += r.inboundLeads; a.qls += r.qls; a.dms += r.dms; a.convos += r.convos;
+    a.booked += r.unqBooked + r.qlBooked; a.callsTaken += r.callsTaken; a.callsClosed += r.callsClosed;
+    a.cash += r.cashCollected; a.revenue += r.revenue;
+    return a;
+  }, { follows: 0, inboundLeads: 0, qls: 0, dms: 0, convos: 0, booked: 0, callsTaken: 0, callsClosed: 0, cash: 0, revenue: 0 });
+}
+const SETTER_LABELS = { jack: "Jack's Setter", lewis: "Lewis' Setter", poppy: "Poppy's Setter" };
+function byPerson(recs) {
+  const map = {};
+  recs.filter(r => r.kind === 'setter').forEach(r => {
+    const key = r.person === 'affiliate' ? (r.affiliateName || r.displayName) : (r.person || r.displayName);
+    // Setter cards always use the setter-identity label (e.g. "Lewis' Setter"),
+    // never a closer-kind row's displayName ("Lewis Sheehy") — same person can
+    // submit both roles, and whichever row is encountered first shouldn't decide
+    // the label on a card that's specifically about setter activity.
+    const label = r.person === 'affiliate' ? (r.affiliateName || r.displayName) : (SETTER_LABELS[r.person] || r.displayName);
+    if (!map[key]) map[key] = { key, person: r.person, displayName: label, follows: 0, inboundLeads: 0, qls: 0, dms: 0, convos: 0, unqBooked: 0, qlBooked: 0 };
+    const t = map[key];
+    t.follows += r.follows; t.inboundLeads += r.inboundLeads; t.qls += r.qls; t.dms += r.dms; t.convos += r.convos;
+    t.unqBooked += r.unqBooked; t.qlBooked += r.qlBooked;
+  });
+  return Object.values(map).map(t => ({ ...t, booked: t.unqBooked + t.qlBooked }));
+}
+function byCloser(recs) {
+  const map = {};
+  recs.forEach(r => {
+    if (r.kind !== 'closer' || !r.person) return;
+    if (!map[r.person]) map[r.person] = { person: r.person, callsTaken: 0, callsClosed: 0, cash: 0, revenue: 0 };
+    const t = map[r.person];
+    t.callsTaken += r.callsTaken; t.callsClosed += r.callsClosed; t.cash += r.cashCollected; t.revenue += r.revenue;
+  });
+  return Object.values(map);
+}
+const CLOSER_LABELS = { jack: 'Jack Glover', lewis: 'Lewis Sheehy', poppy: 'Poppy Daniels' };
+function adSpendForView(view) {
+  if (!state.adSpend.connected) return null;
+  const { start, end } = currentRange();
+  const dailyInRange = state.adSpend.daily.filter(d => inRange(d.date, start, end));
+  const streams = view.streams || Object.keys(state.adSpend.byStream);
+  const spend = dailyInRange.filter(d => streams.includes(d.stream)).reduce((s, d) => s + d.spend, 0);
+  return spend;
+}
+function calendlyForView(view, range) {
+  let recs = state.calendly.filter(c => inRange(c.date, range.start, range.end));
+  if (view.streams) recs = recs.filter(c => view.streams.includes(c.stream));
+  return recs;
+}
+function diallerForRange(range) { return state.dialler.filter(d => inRange(d.date, range.start, range.end)); }
+
+/* ============================================================
+   NAV + PERIOD CONTROLS
+   ============================================================ */
+function buildNav() {
+  const wrap = document.getElementById('navWrap');
+  let html = '';
+  let lastSection = null;
+  VIEWS.forEach(v => {
+    if (v.section !== lastSection) { html += `<div class="nav-label">${v.section}</div>`; lastSection = v.section; }
+    html += `<button class="nav-item ${v.cls} ${state.viewKey === v.key ? 'active' : ''} ${v.disabled ? 'disabled' : ''}" data-key="${v.key}">
+      <span class="bar"></span><span>${v.label}</span>${v.disabled ? '<span class="soon">SOON</span>' : ''}
+    </button>`;
+  });
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => {
+    const v = VIEWS.find(x => x.key === btn.dataset.key);
+    if (v.disabled) return;
+    state.viewKey = v.key; render();
+  }));
+  const sw = document.getElementById('affiliateSwitch');
+  sw.classList.toggle('on', state.affiliatesOn);
+  sw.onclick = () => { state.affiliatesOn = !state.affiliatesOn; render(); };
+}
+function buildPeriodBar() {
+  const bar = document.getElementById('periodBar');
+  bar.innerHTML = PERIODS.map(p => `<button class="pill-btn ${state.period === p ? 'active' : ''}" data-p="${p}">${p}</button>`).join('');
+  bar.querySelectorAll('.pill-btn').forEach(btn => btn.addEventListener('click', () => { state.period = btn.dataset.p; render(); }));
+
+  const dropdownWrap = document.getElementById('dropdownWrap');
+  const customWrap = document.getElementById('customRangeWrap');
+  dropdownWrap.style.display = 'none'; customWrap.style.display = 'none';
+
+  if (state.period === 'Day') {
+    dropdownWrap.style.display = 'flex';
+    const dates = allDates();
+    if (!state.selDay || !dates.includes(state.selDay)) state.selDay = dates[dates.length - 1] || null;
+    dropdownWrap.innerHTML = `<span>Date:</span><select class="period-select" id="daySelect">${dates.map(d => `<option value="${d}" ${d === state.selDay ? 'selected' : ''}>${d}</option>`).join('')}</select>`;
+    document.getElementById('daySelect').addEventListener('change', e => { state.selDay = e.target.value; render(); });
+  } else if (state.period === 'Month') {
+    dropdownWrap.style.display = 'flex';
+    const months = allMonths();
+    if (!state.selMonth || !months.includes(state.selMonth)) state.selMonth = months[months.length - 1] || null;
+    dropdownWrap.innerHTML = `<span>Month:</span><select class="period-select" id="monthSelect">${months.map(m => `<option value="${m}" ${m === state.selMonth ? 'selected' : ''}>${new Date(m + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</option>`).join('')}</select>`;
+    document.getElementById('monthSelect').addEventListener('change', e => { state.selMonth = e.target.value; render(); });
+  } else if (state.period === 'Custom') {
+    customWrap.style.display = 'flex';
+    if (!state.customStart) state.customStart = RANGE_FLOOR;
+    if (!state.customEnd) state.customEnd = allDates().slice(-1)[0] || RANGE_FLOOR;
+    document.getElementById('customStart').value = state.customStart;
+    document.getElementById('customEnd').value = state.customEnd;
+  }
+}
+document.getElementById('customStart').addEventListener('change', e => { state.customStart = e.target.value; render(); });
+document.getElementById('customEnd').addEventListener('change', e => { state.customEnd = e.target.value; render(); });
+document.getElementById('refreshBtn').addEventListener('click', fetchData);
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function heroCard(label, value, ragKey) {
+  return `<div class="card hero-card"><div class="hero-label">${label}</div><div class="hero-value">${ragKey ? ragHtml(value.raw, ragKey, value.text) : value.text}</div></div>`;
+}
+function renderHero(t, spend) {
+  const showPct = t.booked ? (t.callsTaken / t.booked) * 100 : null;
+  const closePct = t.callsTaken ? (t.callsClosed / t.callsTaken) * 100 : null;
+  const cashRoas = spend ? t.cash / spend : null;
+  const revRoas = spend ? t.revenue / spend : null;
+  const cards = [
+    heroCard('Calls Booked', { text: fmt(t.booked) }),
+    heroCard('Calls Taken', { text: fmt(t.callsTaken) }),
+    heroCard('Show %', { text: pct(showPct), raw: showPct }, 'showPct'),
+    heroCard('Calls Closed', { text: fmt(t.callsClosed) }),
+    heroCard('Close %', { text: pct(closePct), raw: closePct }, 'closePct'),
+    heroCard('Cash Collected', { text: gbp(t.cash) }),
+    heroCard('Revenue Generated', { text: gbp(t.revenue) }),
+    heroCard('Cash ROAS', { text: spend ? roas(cashRoas) : '—' }),
+    heroCard('Revenue ROAS', { text: spend ? roas(revRoas) : '—' }),
+  ];
+  document.getElementById('heroGrid').innerHTML = cards.join('');
+}
+
+function renderByPerson(recs, view) {
+  const people = byPerson(recs).sort((a, b) => b.booked - a.booked);
+  if (!people.length) return '<div class="empty-state">No setter submissions in this scope/period.</div>';
+  return `<div class="person-grid">${people.map(p => {
+    const dmConvo = p.dms ? (p.convos / p.dms) * 100 : null;
+    const convoCall = p.convos ? (p.booked / p.convos) * 100 : null;
+    const cls = p.person === 'affiliate' ? 'affiliate' : (['blueB2C','blueAgency'].some(s=>(view.streams||[]).includes(s)) ? 'blue' : (['pinkB2C','pinkAgency'].some(s=>(view.streams||[]).includes(s)) ? 'pink' : ''));
+    return `<div class="card person-card ${cls}">
+      <div class="head">${p.displayName}</div>
+      <div class="stat-row"><span class="n">Follows</span><span class="v">${fmt(p.follows)}</span></div>
+      <div class="stat-row"><span class="n">Inbound</span><span class="v">${fmt(p.inboundLeads)}</span></div>
+      <div class="stat-row"><span class="n">QLs</span><span class="v">${fmt(p.qls)}</span></div>
+      <div class="stat-row"><span class="n">DMs</span><span class="v">${fmt(p.dms)}</span></div>
+      <div class="stat-row"><span class="n">DM → Convo %</span><span class="v">${ragHtml(dmConvo, 'dmConvo', pct(dmConvo))}</span></div>
+      <div class="stat-row"><span class="n">Convos</span><span class="v">${fmt(p.convos)}</span></div>
+      <div class="stat-row"><span class="n">Convo → Call %</span><span class="v">${ragHtml(convoCall, 'convoToCall', pct(convoCall))}</span></div>
+      <div class="stat-row"><span class="n">Unq Appt Booked</span><span class="v">${fmt(p.unqBooked)}</span></div>
+      <div class="stat-row"><span class="n">QL Appt Booked</span><span class="v">${fmt(p.qlBooked)}</span></div>
+      <div class="stat-row"><span class="n">Calls Booked</span><span class="v">${fmt(p.booked)}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderByCloser(recs) {
+  const closers = byCloser(recs).filter(c => c.callsTaken || c.callsClosed || c.cash || c.revenue);
+  if (!closers.length) return '<div class="empty-state">No closing activity in this scope/period.</div>';
+  return `<div class="person-grid">${closers.map(c => {
+    const closePct = c.callsTaken ? (c.callsClosed / c.callsTaken) * 100 : null;
+    const avgDeal = c.callsClosed ? c.revenue / c.callsClosed : null;
+    return `<div class="card person-card">
+      <div class="head">${CLOSER_LABELS[c.person] || c.person}</div>
+      <div class="stat-row"><span class="n">Calls Taken</span><span class="v">${fmt(c.callsTaken)}</span></div>
+      <div class="stat-row"><span class="n">Calls Closed</span><span class="v">${fmt(c.callsClosed)}</span></div>
+      <div class="stat-row"><span class="n">Close %</span><span class="v">${ragHtml(closePct, 'closePct', pct(closePct))}</span></div>
+      <div class="stat-row"><span class="n">Cash Collected</span><span class="v">${gbp(c.cash)}</span></div>
+      <div class="stat-row"><span class="n">Revenue</span><span class="v">${gbp(c.revenue)}</span></div>
+      <div class="stat-row"><span class="n">Avg Deal Size</span><span class="v">${avgDeal !== null ? gbp(avgDeal) : '—'}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderAffiliateLeague(recs) {
+  const { start, end } = currentRange();
+  const byAff = {};
+  calendlyForView(currentView(), { start, end }).forEach(c => {
+    if (!c.stream || !/Affiliate/.test(c.stream)) return;
+    const name = c.sourceLabel;
+    byAff[name] = (byAff[name] || 0) + 1;
+  });
+  // also count booked calls from the setter-side affiliate rows as a fallback signal
+  byPerson(recs.filter(r => r.person === 'affiliate')).forEach(p => { if (!(p.key in byAff)) byAff[p.key] = 0; });
+  const rows = Object.entries(byAff).sort((a, b) => b[1] - a[1]);
+  if (!rows.length) return '<div class="empty-state">No affiliate bookings yet.</div>';
+  const max = Math.max(1, ...rows.map(r => r[1]));
+  const medals = ['🥇', '🥈', '🥉'];
+  return `<table><thead><tr><th>Affiliate</th><th>Calendly Bookings</th><th></th></tr></thead><tbody>
+    ${rows.map(([name, count], i) => `<tr class="${i === 0 ? 'top-row' : ''}"><td>${medals[i] ? `<span class="medal">${medals[i]}</span>` : ''}${name}</td><td class="num">${count}</td>
+      <td><div class="rate-bar" style="width:120px;"><span style="width:${(count / max) * 100}%"></span></div></td></tr>`).join('')}
+  </tbody></table>`;
+}
+
+function renderDialler(range) {
+  const recs = diallerForRange(range);
+  const sum = k => recs.reduce((s, r) => s + (r[k] || 0), 0);
+  const dials = sum('dials'), pickUps = sum('pickUps'), coldBooked = sum('coldBooked'), vslCalled = sum('vslCalled'), vslBooked = sum('vslBooked');
+  const pickupPct = dials ? (pickUps / dials) * 100 : null;
+  const coldBookingPct = dials ? (coldBooked / dials) * 100 : null;
+  const vslBookingPct = vslCalled ? (vslBooked / vslCalled) * 100 : null;
+  if (!recs.length) return '<div class="empty-state">No Dialler submissions in this period yet.</div>';
+  return `
+    <div class="hero-grid">
+      <div class="card hero-card"><div class="hero-label">Pickup %</div><div class="hero-value">${ragHtml(pickupPct, 'pickupPct', pct(pickupPct))}</div></div>
+      <div class="card hero-card"><div class="hero-label">Cold Dial → Booking %</div><div class="hero-value">${ragHtml(coldBookingPct, 'coldBookingPct', pct(coldBookingPct))}</div></div>
+      <div class="card hero-card"><div class="hero-label">VSL Applicant → Booking %</div><div class="hero-value">${ragHtml(vslBookingPct, 'vslBookingPct', pct(vslBookingPct))}</div></div>
+      <div class="card hero-card"><div class="hero-label">Total Calls Booked</div><div class="hero-value">${fmt(sum('totalCallsBooked'))}</div></div>
+    </div>
+    <div class="panel-grid">
+      <div class="card panel"><h3>Cold Funnel</h3>
+        <div class="stat-row"><span class="n">Dials Attempted</span><span class="v">${fmt(dials)}</span></div>
+        <div class="stat-row"><span class="n">Pick Ups</span><span class="v">${fmt(pickUps)}</span></div>
+        <div class="stat-row"><span class="n">Voicemails Left</span><span class="v">${fmt(sum('voicemails'))}</span></div>
+        <div class="stat-row"><span class="n">No Answers</span><span class="v">${fmt(sum('noAnswers'))}</span></div>
+        <div class="stat-row"><span class="n">1st Dial Complete</span><span class="v">${fmt(sum('cold1st'))}</span></div>
+        <div class="stat-row"><span class="n">2nd Dial Complete</span><span class="v">${fmt(sum('cold2nd'))}</span></div>
+        <div class="stat-row"><span class="n">Not Interested / Unqualified</span><span class="v">${fmt(sum('coldNotInterested'))}</span></div>
+        <div class="stat-row"><span class="n">Cold Leads Booked</span><span class="v">${fmt(coldBooked)}</span></div>
+      </div>
+      <div class="card panel"><h3>VSL Funnel</h3>
+        <div class="stat-row"><span class="n">VSL Applicants Called</span><span class="v">${fmt(vslCalled)}</span></div>
+        <div class="stat-row"><span class="n">Confirmed Unqualified</span><span class="v">${fmt(sum('vslUnqualified'))}</span></div>
+        <div class="stat-row"><span class="n">1st Dial Missed</span><span class="v">${fmt(sum('vsl1stMissed'))}</span></div>
+        <div class="stat-row"><span class="n">2nd Dial Missed</span><span class="v">${fmt(sum('vsl2ndMissed'))}</span></div>
+        <div class="stat-row"><span class="n">VSL Applicants Booked</span><span class="v">${fmt(vslBooked)}</span></div>
+        <div class="stat-row"><span class="n">WhatsApp Groups Created</span><span class="v">${fmt(sum('whatsappGroups'))}</span></div>
+        <div class="stat-row"><span class="n">No-Shows Rebooked</span><span class="v">${fmt(sum('noShowsRebooked'))}</span></div>
+      </div>
+    </div>`;
+}
+
+function renderCalendlyTable(view, range) {
+  const recs = calendlyForView(view, range);
+  if (!recs.length) return '<div class="empty-state">No Calendly bookings matched to this scope/period.</div>';
+  const bySource = {};
+  recs.forEach(c => { bySource[c.sourceLabel] = (bySource[c.sourceLabel] || 0) + 1; });
+  const rows = Object.entries(bySource).sort((a, b) => b[1] - a[1]);
+  return `<table><thead><tr><th>Source</th><th>Bookings</th></tr></thead><tbody>${rows.map(([s, c]) => `<tr><td>${s}</td><td class="num">${c}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function renderFunnelCard(t) {
+  const showPct = t.booked ? (t.callsTaken / t.booked) * 100 : null;
+  const closePct = t.callsTaken ? (t.callsClosed / t.callsTaken) * 100 : null;
+  return `<div class="card funnel-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0;">Funnel — Booked → Taken → Closed</h3>
+    <div class="chips">
+      <div class="chip-stat"><div class="lbl">Booked</div><div class="val">${fmt(t.booked)}</div></div>
+      <div class="chip-stat"><div class="lbl">Taken</div><div class="val">${fmt(t.callsTaken)}</div></div>
+      <div class="chip-stat"><div class="lbl">Show %</div><div class="val">${ragHtml(showPct, 'showPct', pct(showPct))}</div></div>
+      <div class="chip-stat"><div class="lbl">Closed</div><div class="val">${fmt(t.callsClosed)}</div></div>
+      <div class="chip-stat"><div class="lbl">Close %</div><div class="val">${ragHtml(closePct, 'closePct', pct(closePct))}</div></div>
+    </div></div>`;
+}
+
+function renderAdSpendCard(t, view) {
+  if (!state.adSpend.connected) return '<div class="card adspend-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0 0 6px;">Ad Spend</h3><div class="not-connected">Meta Ads not connected — set META_ACCESS_TOKEN to enable ROAS &amp; cost-per-X metrics.</div></div>';
+  const spend = adSpendForView(view) || 0;
+  const costBooked = t.booked ? spend / t.booked : null;
+  const costTaken = t.callsTaken ? spend / t.callsTaken : null;
+  const costClose = t.callsClosed ? spend / t.callsClosed : null;
+  const revRoas = spend ? t.revenue / spend : null;
+  return `<div class="card adspend-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0;">Ad Spend</h3>
+    <div class="adspend-grid">
+      <div class="chip-stat"><div class="lbl">Spend</div><div class="val">${gbp(spend)}</div></div>
+      <div class="chip-stat"><div class="lbl">Cost / Booked</div><div class="val">${costBooked !== null ? gbp(costBooked) : '—'}</div></div>
+      <div class="chip-stat"><div class="lbl">Cost / Taken</div><div class="val">${costTaken !== null ? gbp(costTaken) : '—'}</div></div>
+      <div class="chip-stat"><div class="lbl">Cost / Close</div><div class="val">${costClose !== null ? gbp(costClose) : '—'}</div></div>
+      <div class="chip-stat"><div class="lbl">Revenue</div><div class="val">${gbp(t.revenue)}</div></div>
+      <div class="chip-stat"><div class="lbl">ROAS</div><div class="val">${spend ? roas(revRoas) : '—'}</div></div>
+    </div></div>`;
+}
+
+function drawLineChart(canvas, buckets, series, colors, labels) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const h = parseInt(canvas.getAttribute('height'), 10) || 220;
+  canvas.width = rect.width * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, rect.width, h);
+  if (!buckets.length) return;
+  const pad = { top: 20, right: 8, bottom: 24, left: 38 };
+  const w = rect.width - pad.left - pad.right; const ih = h - pad.top - pad.bottom;
+  const maxVal = Math.max(1, ...series.flat());
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { const y = pad.top + (ih / 4) * i; ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + w, y); ctx.stroke(); }
+  series.forEach((data, si) => {
+    ctx.beginPath(); ctx.strokeStyle = colors[si]; ctx.lineWidth = 2.3;
+    data.forEach((v, i) => { const x = pad.left + (w / Math.max(1, data.length - 1)) * i; const y = pad.top + ih - (v / maxVal) * ih; i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+    ctx.stroke();
+    data.forEach((v, i) => { const x = pad.left + (w / Math.max(1, data.length - 1)) * i; const y = pad.top + ih - (v / maxVal) * ih; ctx.beginPath(); ctx.fillStyle = colors[si]; ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill(); });
+  });
+  ctx.fillStyle = '#a8a8a8'; ctx.font = '10px Inter, sans-serif'; ctx.textAlign = 'center';
+  const stride = Math.ceil(buckets.length / 10);
+  buckets.forEach((b, i) => { if (i % stride !== 0) return; const x = pad.left + (w / Math.max(1, buckets.length - 1)) * i; ctx.fillText(b.label, x, h - 6); });
+  ctx.textAlign = 'left'; let lx = pad.left;
+  labels.forEach((label, i) => { ctx.fillStyle = colors[i]; ctx.fillText('● ' + label, lx, 12); lx += label.length * 5.8 + 22; });
+}
+
+function bucketSum(recs, buckets, fn) { return buckets.map(b => recs.filter(r => inRange(r.date, b.start, b.end)).reduce((s, r) => s + fn(r), 0)); }
+
+function renderTrends(recs, range) {
+  if (daysBetween(range.start, range.end) < 2) return '';
+  const buckets = buildBuckets(range.start, range.end);
+  return `
+    <div class="panel-grid">
+      <div class="card panel"><h3>Revenue &amp; Cash <span class="hint">by day</span></h3><canvas id="chartRevCash" height="200"></canvas></div>
+      <div class="card panel"><h3>Calls: Booked / Taken / Closed <span class="hint">by day</span></h3><canvas id="chartCalls" height="200"></canvas></div>
+    </div>
+    <div class="panel-grid">
+      <div class="card panel" style="grid-column:1 / -1;"><h3>DMs &amp; Conversations <span class="hint">by day</span></h3><canvas id="chartDms" height="200"></canvas></div>
+    </div>
+  `;
+}
+function paintTrendCharts(recs, buckets) {
+  const revEl = document.getElementById('chartRevCash'); if (!revEl) return;
+  drawLineChart(revEl, buckets, [bucketSum(recs, buckets, r => r.revenue), bucketSum(recs, buckets, r => r.cashCollected)], ['#ffffff', '#adadad'], ['Revenue', 'Cash']);
+  drawLineChart(document.getElementById('chartCalls'), buckets, [
+    bucketSum(recs, buckets, r => r.unqBooked + r.qlBooked), bucketSum(recs, buckets, r => r.callsTaken), bucketSum(recs, buckets, r => r.callsClosed),
+  ], ['#6b6b6b', '#d9d9d9', '#ffffff'], ['Booked', 'Taken', 'Closed']);
+  drawLineChart(document.getElementById('chartDms'), buckets, [bucketSum(recs, buckets, r => r.dms), bucketSum(recs, buckets, r => r.convos)], ['#6b6b6b', '#ffffff'], ['DMs', 'Convos']);
+}
+
+/* ============================================================
+   TOP-LEVEL RENDER
+   ============================================================ */
+function render() {
+  buildNav();
+  buildPeriodBar();
+  const view = currentView();
+  const range = currentRange();
+  document.getElementById('rangeCaption').textContent = rangeLabel(range.start, range.end);
+  document.getElementById('viewTitle').textContent = view.label;
+  document.getElementById('viewSub').textContent = state.period === 'Day' || state.period === 'Month' ? (state.selDay || state.selMonth || '') : rangeLabel(range.start, range.end);
+
+  document.getElementById('disabledNote').style.display = view.disabled ? 'block' : 'none';
+  document.getElementById('heroGrid').style.display = view.disabled ? 'none' : '';
+
+  if (view.disabled) { document.getElementById('viewBody').innerHTML = ''; document.getElementById('footer').textContent = `Last synced ${state.fetchedAt ? state.fetchedAt.toLocaleTimeString() : '—'}`; return; }
+
+  const recs = filterRows(state.rows, view, range);
+  const t = totals(recs);
+  const spend = adSpendForView(view);
+  renderHero(t, spend);
+
+  let body = '';
+  if (view.affiliateView) {
+    body += `<div class="section-h">Affiliate League Table</div>${renderAffiliateLeague(recs)}`;
+  }
+  body += `<div class="section-h">By ${view.affiliateView ? 'Affiliate' : 'Setter'}</div>${renderByPerson(recs, view)}`;
+  const closerBody = renderByCloser(recs);
+  if (!closerBody.includes('No closing activity')) body += `<div class="section-h">By Closer</div>${closerBody}`;
+  if (view.showDialler) body += `<div class="section-h">Dialler Activity</div>${renderDialler(range)}`;
+  body += `<div class="section-h">Calendly Bookings <span class="hint">by source — separate from the Calls Booked figure above</span></div>${renderCalendlyTable(view, range)}`;
+  body += `<div class="section-h">Funnel</div>${renderFunnelCard(t)}`;
+  body += renderAdSpendCard(t, view);
+  const trendHtml = renderTrends(recs, range);
+  if (trendHtml) body += `<div class="section-h">Trend</div>${trendHtml}`;
+
+  document.getElementById('viewBody').innerHTML = body;
+
+  if (trendHtml) paintTrendCharts(recs, buildBuckets(range.start, range.end));
+
+  document.getElementById('footer').textContent = `${state.rows.length} stream-rows · ${state.dialler.length} dialler submissions · ${state.calendly.length} Calendly bookings · last synced ${state.fetchedAt ? state.fetchedAt.toLocaleTimeString() : '—'}`;
+}
+
+window.addEventListener('resize', () => { const view = currentView(); if (!view.disabled) render(); });
+
+fetchData();
+</script>
+</body>
+</html>
