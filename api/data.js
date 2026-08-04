@@ -50,7 +50,7 @@ async function fetchMetaAccountSpend(accountId, token, since, until) {
   const rows = [];
   const params = new URLSearchParams({
     level: 'campaign',
-    fields: 'campaign_name',
+    fields: 'campaign_name,spend',
     time_range: JSON.stringify({ since, until }),
     time_increment: '1',
     limit: '500',
