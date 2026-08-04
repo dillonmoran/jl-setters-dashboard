@@ -18,7 +18,7 @@
     --w-1: #ffffff; --w-2: #d9d9d9; --w-3: #adadad;
     --w-gradient: linear-gradient(180deg, var(--w-1) 0%, var(--w-2) 55%, var(--w-3) 100%);
     --w-gradient-h: linear-gradient(90deg, transparent, var(--w-2) 25%, var(--w-1) 50%, var(--w-2) 75%, transparent);
-    --blue: #6fa8ff; --pink: #ff8fc6; --affiliate: #f0b429;
+    --blue: #6fa8ff; --pink: #ff8fc6;
     --red: #e2665f; --amber: #f0b429; --green: #6fcf97;
     --text: #f5f5f5; --text-dim: #a8a8a8; --text-faint: #6b6b6b;
     --font-heading: 'Playfair Display', Georgia, serif;
@@ -49,14 +49,6 @@
   .nav-item .bar { width: 3px; height: 15px; border-radius: 2px; background: var(--text-faint); flex-shrink: 0; }
   .nav-item.blue .bar { background: var(--blue); }
   .nav-item.pink .bar { background: var(--pink); }
-  .nav-item.affiliate .bar { background: var(--affiliate); }
-  .nav-item .soon { margin-left: auto; font-size: 8.5px; padding: 2px 6px; border-radius: 4px; background: var(--brand-bg); color: var(--text-faint); border: 1px solid var(--brand-border); }
-  .nav-item.disabled { opacity: 0.4; cursor: default; }
-  .affiliate-toggle-wrap { margin: 22px 8px 0; padding-top: 16px; border-top: 1px solid var(--brand-border); display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-dim); }
-  .switch { position: relative; width: 36px; height: 20px; background: var(--brand-surface-2); border-radius: 999px; cursor: pointer; border: 1px solid var(--brand-border-strong); }
-  .switch .knob { position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 50%; background: var(--text-faint); transition: transform 0.15s ease, background 0.15s ease; }
-  .switch.on { background: rgba(111,207,151,0.18); border-color: var(--green); }
-  .switch.on .knob { transform: translateX(16px); background: var(--green); }
 
   .main-content { flex: 1; min-width: 0; padding: 22px clamp(16px, 3vw, 44px) 60px; }
   @media (max-width: 860px) { .app-shell { flex-direction: column; } .sidebar { width: 100%; height: auto; position: relative; } }
@@ -101,7 +93,6 @@
   .person-card .head { font-family: var(--font-heading); font-weight: 700; font-size: 14px; margin-bottom: 10px; padding-bottom: 8px; border-left: 3px solid var(--w-2); padding-left: 8px; }
   .person-card.blue .head { border-color: var(--blue); }
   .person-card.pink .head { border-color: var(--pink); }
-  .person-card.affiliate .head { border-color: var(--affiliate); }
   .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid rgba(255,255,255,0.04); }
   .stat-row:last-child { border-bottom: none; }
   .stat-row .n { color: var(--text-dim); }
@@ -142,10 +133,6 @@
   <aside class="sidebar">
     <div class="sidebar-brand"><div class="name">JL Setters</div><div class="sub">LIVE DASHBOARD</div></div>
     <div id="navWrap"></div>
-    <div class="affiliate-toggle-wrap">
-      <span>Affiliates</span>
-      <div class="switch on" id="affiliateSwitch"><div class="knob"></div></div>
-    </div>
   </aside>
 
   <main class="main-content">
@@ -168,8 +155,6 @@
     </div>
 
     <div class="hero-grid" id="heroGrid"></div>
-
-    <div id="disabledNote" style="display:none;" class="empty-state">This view is coming soon — no Pink Affiliate data source exists yet.</div>
 
     <div id="viewBody"></div>
 
@@ -249,9 +234,6 @@ const VIEWS = [
   { key: 'pinkOverview', section: 'PINK', label: 'Pink Overview', cls: 'pink', streams: ['pinkB2C', 'pinkAgency', 'pinkAffiliateB2C', 'pinkAffiliateAgency'] },
   { key: 'pinkB2C', section: 'PINK', label: 'Pink B2C', cls: 'pink', streams: ['pinkB2C'] },
   { key: 'pinkAgency', section: 'PINK', label: 'Pink Agency', cls: 'pink', streams: ['pinkAgency'] },
-  { key: 'affiliatesAll', section: 'AFFILIATES', label: 'Overall Affiliates', cls: 'affiliate', streams: ['blueAffiliateB2C', 'blueAffiliateAgency', 'pinkAffiliateB2C', 'pinkAffiliateAgency'], affiliateView: true },
-  { key: 'blueAffiliates', section: 'AFFILIATES', label: 'Blue Affiliates', cls: 'affiliate', streams: ['blueAffiliateB2C', 'blueAffiliateAgency'], affiliateView: true },
-  { key: 'pinkAffiliates', section: 'AFFILIATES', label: 'Pink Affiliates', cls: 'affiliate', streams: ['pinkAffiliateB2C', 'pinkAffiliateAgency'], affiliateView: true, disabled: true },
 ];
 const PERIODS = ['Day', '7D', '30D', 'Month', '3M', '6M', '9M', '12M', 'Custom'];
 
@@ -259,7 +241,6 @@ let state = {
   rows: [], dialler: [], calendly: [], adSpend: { connected: false, byStream: {}, untagged: 0, daily: [] },
   fetchedAt: null,
   viewKey: 'overview',
-  affiliatesOn: true,
   period: '30D', selDay: null, selMonth: null,
   customStart: null, customEnd: null,
   leaderboardSort: { key: 'booked', dir: 'desc' },
@@ -458,7 +439,13 @@ async function fetchData() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
 
-    state.rows = [...parseBlueRows(data.blue || []), ...parsePinkRows(data.pink || []), ...parseAffiliateRows(data.affiliates || [])];
+    // Affiliates never submit daily KPI forms, so their setter-side rows are
+    // intentionally excluded from the dashboard entirely (parseAffiliateRows
+    // is left defined below in case that changes later). Affiliate-*sourced*
+    // revenue that a closer books against blueAffiliateB2C/Agency is a
+    // different data path (from the Blue sheet's closer blocks) and is
+    // unaffected — that's real closer-attributed revenue, not a KPI submission.
+    state.rows = [...parseBlueRows(data.blue || []), ...parsePinkRows(data.pink || [])];
     state.dialler = parseDiallerRows(data.agency || []);
     state.calendly = parseCalendlyRows(data.calendly || []);
     state.adSpend = parseAdSpend(data.adSpend);
@@ -517,7 +504,6 @@ function currentView() { return VIEWS.find(v => v.key === state.viewKey) || VIEW
 function filterRows(rows, view, range) {
   let recs = rows.filter(r => inRange(r.date, range.start, range.end));
   if (view.streams) recs = recs.filter(r => view.streams.includes(r.stream));
-  if (!view.affiliateView && !state.affiliatesOn) recs = recs.filter(r => r.person !== 'affiliate');
   return recs;
 }
 function totals(recs) {
@@ -532,12 +518,12 @@ const SETTER_LABELS = { jack: "Jack's Setter", lewis: "Lewis' Setter", poppy: "P
 function byPerson(recs) {
   const map = {};
   recs.filter(r => r.kind === 'setter').forEach(r => {
-    const key = r.person === 'affiliate' ? (r.affiliateName || r.displayName) : (r.person || r.displayName);
+    const key = r.person || r.displayName;
     // Setter cards always use the setter-identity label (e.g. "Lewis' Setter"),
     // never a closer-kind row's displayName ("Lewis Sheehy") — same person can
     // submit both roles, and whichever row is encountered first shouldn't decide
     // the label on a card that's specifically about setter activity.
-    const label = r.person === 'affiliate' ? (r.affiliateName || r.displayName) : (SETTER_LABELS[r.person] || r.displayName);
+    const label = SETTER_LABELS[r.person] || r.displayName;
     if (!map[key]) map[key] = { key, person: r.person, displayName: label, follows: 0, inboundLeads: 0, qls: 0, dms: 0, convos: 0, unqBooked: 0, qlBooked: 0 };
     const t = map[key];
     t.follows += r.follows; t.inboundLeads += r.inboundLeads; t.qls += r.qls; t.dms += r.dms; t.convos += r.convos;
@@ -580,19 +566,14 @@ function buildNav() {
   let lastSection = null;
   VIEWS.forEach(v => {
     if (v.section !== lastSection) { html += `<div class="nav-label">${v.section}</div>`; lastSection = v.section; }
-    html += `<button class="nav-item ${v.cls} ${state.viewKey === v.key ? 'active' : ''} ${v.disabled ? 'disabled' : ''}" data-key="${v.key}">
-      <span class="bar"></span><span>${v.label}</span>${v.disabled ? '<span class="soon">SOON</span>' : ''}
+    html += `<button class="nav-item ${v.cls} ${state.viewKey === v.key ? 'active' : ''}" data-key="${v.key}">
+      <span class="bar"></span><span>${v.label}</span>
     </button>`;
   });
   wrap.innerHTML = html;
   wrap.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => {
-    const v = VIEWS.find(x => x.key === btn.dataset.key);
-    if (v.disabled) return;
-    state.viewKey = v.key; render();
+    state.viewKey = btn.dataset.key; render();
   }));
-  const sw = document.getElementById('affiliateSwitch');
-  sw.classList.toggle('on', state.affiliatesOn);
-  sw.onclick = () => { state.affiliatesOn = !state.affiliatesOn; render(); };
 }
 function buildPeriodBar() {
   const bar = document.getElementById('periodBar');
@@ -658,7 +639,7 @@ function renderByPerson(recs, view) {
   return `<div class="person-grid">${people.map(p => {
     const dmConvo = p.dms ? (p.convos / p.dms) * 100 : null;
     const convoCall = p.convos ? (p.booked / p.convos) * 100 : null;
-    const cls = p.person === 'affiliate' ? 'affiliate' : (['blueB2C','blueAgency'].some(s=>(view.streams||[]).includes(s)) ? 'blue' : (['pinkB2C','pinkAgency'].some(s=>(view.streams||[]).includes(s)) ? 'pink' : ''));
+    const cls = ['blueB2C','blueAgency'].some(s=>(view.streams||[]).includes(s)) ? 'blue' : (['pinkB2C','pinkAgency'].some(s=>(view.streams||[]).includes(s)) ? 'pink' : '');
     return `<div class="card person-card ${cls}">
       <div class="head">${p.displayName}</div>
       <div class="stat-row"><span class="n">Follows</span><span class="v">${fmt(p.follows)}</span></div>
@@ -691,26 +672,6 @@ function renderByCloser(recs) {
       <div class="stat-row"><span class="n">Avg Deal Size</span><span class="v">${avgDeal !== null ? gbp(avgDeal) : '—'}</span></div>
     </div>`;
   }).join('')}</div>`;
-}
-
-function renderAffiliateLeague(recs) {
-  const { start, end } = currentRange();
-  const byAff = {};
-  calendlyForView(currentView(), { start, end }).forEach(c => {
-    if (!c.stream || !/Affiliate/.test(c.stream)) return;
-    const name = c.sourceLabel;
-    byAff[name] = (byAff[name] || 0) + 1;
-  });
-  // also count booked calls from the setter-side affiliate rows as a fallback signal
-  byPerson(recs.filter(r => r.person === 'affiliate')).forEach(p => { if (!(p.key in byAff)) byAff[p.key] = 0; });
-  const rows = Object.entries(byAff).sort((a, b) => b[1] - a[1]);
-  if (!rows.length) return '<div class="empty-state">No affiliate bookings yet.</div>';
-  const max = Math.max(1, ...rows.map(r => r[1]));
-  const medals = ['🥇', '🥈', '🥉'];
-  return `<table><thead><tr><th>Affiliate</th><th>Calendly Bookings</th><th></th></tr></thead><tbody>
-    ${rows.map(([name, count], i) => `<tr class="${i === 0 ? 'top-row' : ''}"><td>${medals[i] ? `<span class="medal">${medals[i]}</span>` : ''}${name}</td><td class="num">${count}</td>
-      <td><div class="rate-bar" style="width:120px;"><span style="width:${(count / max) * 100}%"></span></div></td></tr>`).join('')}
-  </tbody></table>`;
 }
 
 function renderDialler(range) {
@@ -852,21 +813,13 @@ function render() {
   document.getElementById('viewTitle').textContent = view.label;
   document.getElementById('viewSub').textContent = state.period === 'Day' || state.period === 'Month' ? (state.selDay || state.selMonth || '') : rangeLabel(range.start, range.end);
 
-  document.getElementById('disabledNote').style.display = view.disabled ? 'block' : 'none';
-  document.getElementById('heroGrid').style.display = view.disabled ? 'none' : '';
-
-  if (view.disabled) { document.getElementById('viewBody').innerHTML = ''; document.getElementById('footer').textContent = `Last synced ${state.fetchedAt ? state.fetchedAt.toLocaleTimeString() : '—'}`; return; }
-
   const recs = filterRows(state.rows, view, range);
   const t = totals(recs);
   const spend = adSpendForView(view);
   renderHero(t, spend);
 
   let body = '';
-  if (view.affiliateView) {
-    body += `<div class="section-h">Affiliate League Table</div>${renderAffiliateLeague(recs)}`;
-  }
-  body += `<div class="section-h">By ${view.affiliateView ? 'Affiliate' : 'Setter'}</div>${renderByPerson(recs, view)}`;
+  body += `<div class="section-h">By Setter</div>${renderByPerson(recs, view)}`;
   const closerBody = renderByCloser(recs);
   if (!closerBody.includes('No closing activity')) body += `<div class="section-h">By Closer</div>${closerBody}`;
   if (view.showDialler) body += `<div class="section-h">Dialler Activity</div>${renderDialler(range)}`;
@@ -883,7 +836,7 @@ function render() {
   document.getElementById('footer').textContent = `${state.rows.length} stream-rows · ${state.dialler.length} dialler submissions · ${state.calendly.length} Calendly bookings · last synced ${state.fetchedAt ? state.fetchedAt.toLocaleTimeString() : '—'}`;
 }
 
-window.addEventListener('resize', () => { const view = currentView(); if (!view.disabled) render(); });
+window.addEventListener('resize', () => render());
 
 fetchData();
 </script>
