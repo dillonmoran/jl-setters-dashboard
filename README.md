@@ -63,6 +63,34 @@ no code change needed. Setter Activity also shows a derived **Pitch → Booking 
 (Calls Booked ÷ Calls Pitched) per rep and org-wide, since that isn't a raw
 Airtable field.
 
+## AOV (Average Order Value) per rep
+
+A closed deal often spans more than one SRF row: a "Deposit" or "Closed/Won" row
+at close, then a separate "Remainder Collection (no call)" row later when the
+rest of the payment comes in. Remainder rows carry no Setter/SDR (and are
+submitted well after the original call), so AOV is computed with a two-pass
+match in `public/index.html` (`buildAovClientTotals`):
+
+1. Group **every** SRF row (all-time, not clamped to the Sept cutover — a
+   deposit and its remainder can straddle any date boundary) by **Client Full
+   Name**, trimmed and case-insensitive. This is an **exact** match on purpose:
+   two similarly-spelled names (a real example in the data: "Eros llanes" vs
+   "Eros llans") are treated as different clients rather than risk silently
+   merging two different people. A remainder row whose client name doesn't
+   exactly match any Deposit/Closed-Won row for that client is excluded from
+   AOV entirely — fix the name in Airtable to have it counted.
+2. Cash Collected sums across all of a client's rows. Closer and Setter/SDR
+   attribution comes only from whichever row has Call Outcome "Deposit" or
+   "Closed/Won" — a client with no such row (never actually closed) is
+   excluded, so a stray £0 disqualified lead can't dilute the average.
+
+AOV is then `mean(client total cash)` per rep, shown as "AOV (All-Time)" on
+every rep's card in Setter/Closer/SDR Activity, plus an org-wide "AOV (All
+Clients, All-Time)" hero card on each of those three views. It's deliberately
+**not** period-scoped like the rest of the dashboard (a deposit this month and
+its remainder next month are still one order), so it won't move when you
+switch the Day/Week/Month picker.
+
 ## Deploy (no local Node required)
 
 1. **Google service account**: enable the Google Sheets API on a Cloud project,

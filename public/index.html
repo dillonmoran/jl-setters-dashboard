@@ -213,6 +213,15 @@ const CLOSER_PERSON_KEY = 'Closer name to text';
 const CLOSER_DATE_KEY = 'Date';
 const SRF_PERSON_KEY = 'Closer Name to text';
 const SRF_DATE_KEY = 'Call Date';
+const SRF_CLIENT_KEY = 'Client Full Name';
+const SRF_OUTCOME_KEY = 'Call Outcome';
+const SRF_CASH_KEY = 'Cash Collected';
+const SRF_SETTER_KEY = 'Setter/SDR to text';
+// Only these two outcomes carry real rep attribution — a "Remainder Collection
+// (no call)" row is just a payment against an already-closed deal and has no
+// Setter/SDR (sometimes no fresh Closer context either), so AOV attribution
+// must come from the client's original close, not the remainder row.
+const AOV_ORIGIN_OUTCOMES = ['Deposit', 'Closed/Won'];
 
 const SDR_FUNNELS = [
   { label: 'Pre-Webinar', fields: [
@@ -281,6 +290,7 @@ const PERIODS = ['Day', '7D', '30D', 'Month', '3M', '6M', 'All', 'Custom'];
 let state = {
   legacyStream: [], legacyDialler: [],
   dmSetterEod: [], sdrEod: [], closerEod: [], srf: [], salesTeam: [],
+  aovByCloser: {}, aovBySetterOrSdr: {}, aovOverall: null,
   calendly: [], adSpend: { connected: false, daily: [] },
   fetchedAt: null,
   floor: '2026-01-01',
@@ -467,6 +477,60 @@ function parseSrfFunnel(records) {
     }))
     .filter(r => r.date);
 }
+// AOV needs every SRF row (not clamped to CUTOVER) because a client's deposit
+// and their later remainder-collection row can straddle any date boundary —
+// clamping here would silently break the cross-row match for clients whose
+// deposit landed right before whatever cutoff was applied.
+function parseSrfDeals(records) {
+  return (records || [])
+    .map(r => ({
+      client: String(r.fields[SRF_CLIENT_KEY] || '').trim(),
+      outcome: r.fields[SRF_OUTCOME_KEY] || '',
+      cash: num(r.fields[SRF_CASH_KEY]) || 0,
+      closer: personFrom(r.fields, SRF_PERSON_KEY),
+      setter: personFrom(r.fields, SRF_SETTER_KEY),
+    }))
+    .filter(r => r.client);
+}
+// Groups every SRF row by client name (trimmed, case-insensitive — an exact
+// match, deliberately not fuzzy: two similarly-spelled names are treated as
+// two different clients rather than risk silently merging different people).
+// Cash sums across ALL of a client's rows (deposit + any remainder
+// collections), but Closer/Setter attribution comes only from the row where
+// Call Outcome is "Deposit" or "Closed/Won" — remainder rows carry no
+// Setter/SDR and shouldn't override or dilute that attribution. A client with
+// no such origin row at all (never actually closed) is excluded — there's no
+// real order to average in.
+function buildAovClientTotals(srfDeals) {
+  const groups = {};
+  srfDeals.forEach(r => {
+    const key = r.client.toLowerCase();
+    if (!groups[key]) groups[key] = { client: r.client, cash: 0, closer: null, setter: null, hasOrigin: false };
+    const g = groups[key];
+    g.cash += r.cash;
+    if (AOV_ORIGIN_OUTCOMES.includes(r.outcome)) {
+      g.hasOrigin = true;
+      if (r.closer && r.closer !== 'Unknown') g.closer = r.closer;
+      if (r.setter && r.setter !== 'Unknown') g.setter = r.setter;
+    }
+  });
+  return Object.values(groups).filter(g => g.hasOrigin);
+}
+// { personName: averageOrderValue } — average of each attributed client's
+// total cash collected (deposit + remainder combined), keyed by whichever
+// person field ('closer' or 'setter') the caller wants AOV broken out by.
+function aovByPerson(clientTotals, personKey) {
+  const sums = {}, counts = {};
+  clientTotals.forEach(g => {
+    const person = g[personKey];
+    if (!person) return;
+    sums[person] = (sums[person] || 0) + g.cash;
+    counts[person] = (counts[person] || 0) + 1;
+  });
+  const out = {};
+  Object.keys(sums).forEach(p => { out[p] = sums[p] / counts[p]; });
+  return out;
+}
 // Sales Team roster — Role is a multipleSelects field, so it comes back as an
 // array of strings (e.g. ["DM Setter"]) via the REST API.
 function parseSalesTeam(records) {
@@ -519,6 +583,11 @@ async function fetchData() {
     state.closerEod = parseAirtableRows(data.closerEod, CLOSER_DATE_KEY, CLOSER_PERSON_KEY).filter(r => r.date >= CUTOVER);
     state.srf = parseSrfFunnel(data.srf).filter(r => r.date >= CUTOVER);
     state.salesTeam = parseSalesTeam(data.salesTeam);
+
+    const aovClientTotals = buildAovClientTotals(parseSrfDeals(data.srf));
+    state.aovByCloser = aovByPerson(aovClientTotals, 'closer');
+    state.aovBySetterOrSdr = aovByPerson(aovClientTotals, 'setter');
+    state.aovOverall = aovClientTotals.length ? aovClientTotals.reduce((s, g) => s + g.cash, 0) / aovClientTotals.length : null;
 
     state.calendly = parseCalendlyRows(data.calendly || []);
     state.adSpend = parseAdSpend(data.adSpend);
@@ -712,7 +781,7 @@ function renderSetters(range) {
     const booked = fieldValue(totalsNew, DM_SETTER_FIELDS[4]); // Calls Booked
     const pitchToBooking = pitched ? (booked / pitched) * 100 : null;
     document.getElementById('heroGrid').innerHTML = DM_SETTER_FIELDS.map(f => heroCard(f.label, fieldFmt(totalsNew, f)))
-      .concat(heroCard('Pitch → Booking %', pct(pitchToBooking))).join('');
+      .concat([heroCard('Pitch → Booking %', pct(pitchToBooking)), heroCard('AOV (All Clients, All-Time)', gbp(state.aovOverall))]).join('');
   } else if (legacy) {
     const t = legacyTotals(legacyRows);
     document.getElementById('heroGrid').innerHTML = [
@@ -737,6 +806,7 @@ function renderSetters(range) {
         const rowsHtml = DM_SETTER_FIELDS.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(p.sums, f)}</span></div>`).join('');
         return `<div class="card person-card blue"><div class="head">${p.person}</div>${rowsHtml}
           <div class="stat-row"><span class="n">Pitch → Booking %</span><span class="v">${pct(pitchToBooking)}</span></div>
+          <div class="stat-row"><span class="n">AOV (All-Time)</span><span class="v">${gbp(state.aovBySetterOrSdr[p.person])}</span></div>
         </div>`;
       }).join('')}</div>`;
     } else {
@@ -785,6 +855,7 @@ function renderClosers(range) {
       heroCard('Showed (SRF)', fmt(showed), 'showPct', showPct),
       heroCard('Calls Closed', fieldFmt(totals, CLOSER_FIELDS[3]), 'closePct', closePct),
       heroCard('Disqualified (SRF)', fmt(srfRows.filter(r => r.disqualified).length)),
+      heroCard('AOV (All Clients, All-Time)', gbp(state.aovOverall)),
     ].join('');
   } else if (legacy) {
     const t = legacyTotals(legacyRows);
@@ -824,6 +895,7 @@ function renderClosers(range) {
           <div class="stat-row"><span class="n">Showed (SRF)</span><span class="v">${fmt(srfForPerson.filter(r => r.showed).length)}</span></div>
           <div class="stat-row"><span class="n">Closed (SRF)</span><span class="v">${fmt(srfForPerson.filter(r => r.closed).length)}</span></div>
           <div class="stat-row"><span class="n">Disqualified (SRF)</span><span class="v">${fmt(srfForPerson.filter(r => r.disqualified).length)}</span></div>
+          <div class="stat-row"><span class="n">AOV (All-Time)</span><span class="v">${gbp(state.aovByCloser[p.person])}</span></div>
         </div>`;
       }).join('')}</div>`;
     } else {
@@ -892,6 +964,7 @@ function renderSdr(range) {
       heroCard('Total Dial Attempts', fmt(totalDialsAttempted)), heroCard('Total Connects', fmt(totalConnects)),
       heroCard('Total Appts Set', fmt(totalAppts)), heroCard('Triages Attempted', fmt(totals['Triages Attempted'])),
       heroCard('Triages Connected', fmt(totals['Triages Connected (Made)'])),
+      heroCard('AOV (All Clients, All-Time)', gbp(state.aovOverall)),
     ].join('');
   } else if (legacy) {
     const sum = k => legacyRows.reduce((s, r) => s + (r[k] || 0), 0);
@@ -913,7 +986,10 @@ function renderSdr(range) {
       const people = byPersonAgg(currentRows, SDR_FIELDS, roster);
       body += `<div class="person-grid">${people.map(p => {
         const funnelBody = SDR_FUNNELS.map(funnel => `<div class="substat-label">${funnel.label}</div>${funnel.fields.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(p.sums, f)}</span></div>`).join('')}`).join('');
-        return `<div class="card person-card pink"><div class="head">${p.person}</div>${funnelBody}</div>`;
+        return `<div class="card person-card pink"><div class="head">${p.person}</div>${funnelBody}
+          <div class="substat-label">Deals</div>
+          <div class="stat-row"><span class="n">AOV (All-Time)</span><span class="v">${gbp(state.aovBySetterOrSdr[p.person])}</span></div>
+        </div>`;
       }).join('')}</div>`;
     } else {
       body += '<div class="empty-state">No SDR EOD submissions in this period.</div>';
