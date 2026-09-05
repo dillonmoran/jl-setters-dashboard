@@ -84,12 +84,19 @@ rows landed on Aug 30th, but only 21 were actually distinct people.
 `dedupeCalendlyByPerson` (`public/index.html`) collapses this, applied once in
 `fetchData` right after parsing, so every downstream use of `state.calendly`
 (the Calls Booked figure, the Calendly Bookings table, the footer count) is
-already deduplicated — nothing else needed to change. Two rows are the same
-person if they share an exact email (cheap, reliable — Calendly requires one)
-or a fuzzy-matched name (same `nameSimilarity`/threshold as AOV client
-matching). Matching is scoped **per event type**: the same person booking a
-Discovery Call and, separately, a Strategy Call is two real distinct bookings,
-not a duplicate. Whichever row has the earliest date becomes that person's
+already deduplicated — nothing else needed to change. Matching uses
+`clusterByIdentity` — a shared helper also used by AOV client matching — with
+a strict priority order: an **exact email match** is the only thing that
+counts as the same person when both rows have one; fuzzy name matching is
+used **only** as a fallback for rows with no email to go on. This ordering is
+deliberate and fixes a real bug: matching on name first meant two different
+real people who happened to both be named "Aj Aj" (two different emails) got
+wrongly merged. Now, if two rows have different emails, they're always
+treated as different people regardless of how similar the names look — email
+is the strongest signal, and never gets overridden by a name match. Matching
+is scoped **per event type**: the same person booking a Discovery Call and,
+separately, a Strategy Call is two real distinct bookings, not a duplicate.
+Whichever row has the earliest date becomes that person's
 counted booking date — a reschedule moves an appointment, it isn't a new lead.
 
 ## Roster — who shows up where
@@ -114,17 +121,23 @@ submitted well after the original call), so AOV is computed with a two-pass
 match in `public/index.html` (`buildAovClientTotals`):
 
 1. Group **every** SRF row (all-time, not clamped to the Sept cutover — a
-   deposit and its remainder can straddle any date boundary) by **Client Full
-   Name**, using fuzzy matching (`clusterClientNames`/`nameSimilarity` —
-   Levenshtein edit distance normalized by name length, threshold 0.82, names
-   under 4 characters excluded from fuzzy matching). Client names are
-   hand-typed by different reps on different rows, so exact matching missed
-   real matches: "Eros llanes" vs "Eros llans" scores ~0.91 and now merges.
-   The threshold is picked to still keep genuinely different names apart —
-   "John" vs "John Ellis" scores ~0.4 and stays separate. This is a
-   similarity heuristic, not a guarantee: if two different clients happen to
-   have very similar names, double-check the AOV numbers against Airtable
-   directly rather than trusting the merge blindly.
+   deposit and its remainder can straddle any date boundary) by client
+   identity via `clusterByIdentity` (`public/index.html` — shared with
+   Calendly booking dedup, see below), in strict priority order: **Client
+   Email** first (exact match only), then **Client Phone** (digits-only, last
+   9 compared, so formatting differences don't matter), and **Client Full
+   Name** — fuzzy-matched (Levenshtein edit distance normalized by length,
+   threshold 0.82, names under 4 characters excluded) — only as a last resort
+   when neither email nor phone is available on a row. Email/phone always win
+   over name: two rows with different emails are always different clients no
+   matter how similar their names look, which matters because client names
+   are hand-typed by different reps and genuinely different people can share
+   a name. Within the name-only fallback tier, "Eros llanes" vs "Eros llans"
+   scores ~0.91 and merges, while "John" vs "John Ellis" scores ~0.4 and
+   stays separate. Still a heuristic, not a guarantee — if two different
+   *email-less* clients happen to have very similar names, double-check the
+   AOV numbers against Airtable directly rather than trusting the merge
+   blindly.
 2. Cash Collected sums across all of a client's rows. Closer and Setter/SDR
    attribution comes only from whichever row has Call Outcome "Deposit" or
    "Closed/Won" — a client with no such row (never actually closed) is

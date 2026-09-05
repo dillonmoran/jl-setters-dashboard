@@ -214,6 +214,8 @@ const CLOSER_DATE_KEY = 'Date';
 const SRF_PERSON_KEY = 'Closer Name to text';
 const SRF_DATE_KEY = 'Call Date';
 const SRF_CLIENT_KEY = 'Client Full Name';
+const SRF_CLIENT_EMAIL_KEY = 'Client Email';
+const SRF_CLIENT_PHONE_KEY = 'Client Phone';
 const SRF_OUTCOME_KEY = 'Call Outcome';
 const SRF_CASH_KEY = 'Cash Collected';
 const SRF_SETTER_KEY = 'Setter/SDR to text';
@@ -495,6 +497,8 @@ function parseSrfDeals(records) {
   return (records || [])
     .map(r => ({
       client: String(r.fields[SRF_CLIENT_KEY] || '').trim(),
+      clientEmail: String(r.fields[SRF_CLIENT_EMAIL_KEY] || '').trim().toLowerCase(),
+      clientPhone: String(r.fields[SRF_CLIENT_PHONE_KEY] || '').trim(),
       outcome: r.fields[SRF_OUTCOME_KEY] || '',
       cash: num(r.fields[SRF_CASH_KEY]) || 0,
       closer: personFrom(r.fields, SRF_PERSON_KEY),
@@ -502,11 +506,17 @@ function parseSrfDeals(records) {
     }))
     .filter(r => r.client);
 }
-// Fuzzy client-name matching — these are free-text names typed by hand by
-// different reps on different rows (a deposit and its remainder collection
-// are rarely typed identically), so exact string matching missed real
-// matches like "Eros llanes" vs "Eros llans". Levenshtein edit distance,
-// normalized by the longer name's length, gives a 0..1 similarity score.
+// Identity clustering shared by AOV client matching and Calendly booking
+// dedup. Priority order matters and is deliberate: email is the strongest
+// signal (two different people essentially never share one), phone is next,
+// and fuzzy name is a last resort used ONLY when neither is available for an
+// item — never as a tie-breaker once an email is present. Matching by name
+// first was the bug: two different real people both named "Aj Aj" (two
+// different emails) got wrongly merged. If an item has an email, it is only
+// ever grouped with other items sharing that exact email — a name match
+// alone is not enough to override a mismatched (or present-vs-absent) email.
+// Levenshtein edit distance, normalized by the longer name's length, gives
+// the 0..1 fuzzy-name similarity score for the name-only fallback tier.
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
   if (!m) return n;
@@ -529,6 +539,12 @@ function nameSimilarity(a, b) {
   return 1 - levenshtein(a, b) / maxLen;
 }
 function normalizeClientName(name) { return String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+// Compares the last 9 digits so formatting differences ("+44 7576 297391" vs
+// "07576297391") still match; too short to be a real number below that.
+function normalizePhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits.length >= 7 ? digits.slice(-9) : '';
+}
 // Threshold picked to catch realistic single-letter typos/swaps ("Eros
 // llanes" vs "Eros llans" scores ~0.91) while still keeping genuinely
 // different names apart ("John" vs "John Ellis" scores ~0.4). The minimum
@@ -536,46 +552,58 @@ function normalizeClientName(name) { return String(name || '').trim().toLowerCas
 // the string) from matching each other too easily.
 const FUZZY_NAME_THRESHOLD = 0.82;
 const FUZZY_NAME_MIN_LEN = 4;
-// Greedy single-pass clustering: each new name joins the first existing
-// cluster it's a close enough match for, otherwise starts its own. Good
-// enough for a sales team's client list (tens to low hundreds of names) —
-// this is O(n^2) in distinct names, not SRF rows.
-function clusterClientNames(rawNames) {
-  const clusters = []; // { normalized, members: [rawName, ...] }
-  rawNames.forEach(raw => {
-    const norm = normalizeClientName(raw);
-    if (!norm) return;
-    const match = clusters.find(c => c.normalized === norm ||
-      (Math.min(norm.length, c.normalized.length) >= FUZZY_NAME_MIN_LEN && nameSimilarity(norm, c.normalized) >= FUZZY_NAME_THRESHOLD));
-    if (match) match.members.push(raw);
-    else clusters.push({ normalized: norm, members: [raw] });
-  });
-  const clusterIndexByName = {};
-  clusters.forEach((c, idx) => c.members.forEach(raw => { clusterIndexByName[raw] = idx; }));
-  return clusterIndexByName;
-}
-// Groups every SRF row by fuzzy-matched client name. Cash sums across ALL of
-// a client's rows (deposit + any remainder collections), but Closer/Setter
-// attribution comes only from the row where Call Outcome is "Deposit" or
-// "Closed/Won" — remainder rows carry no Setter/SDR and shouldn't override or
-// dilute that attribution. A client with no such origin row at all (never
-// actually closed) is excluded — there's no real order to average in.
-function buildAovClientTotals(srfDeals) {
-  const clusterIndexByName = clusterClientNames(srfDeals.map(r => r.client));
-  const groups = {};
-  srfDeals.forEach(r => {
-    const key = clusterIndexByName[r.client];
-    if (key === undefined) return;
-    if (!groups[key]) groups[key] = { client: r.client, cash: 0, closer: null, setter: null, hasOrigin: false };
-    const g = groups[key];
-    g.cash += r.cash;
-    if (AOV_ORIGIN_OUTCOMES.includes(r.outcome)) {
-      g.hasOrigin = true;
-      if (r.closer && r.closer !== 'Unknown') g.closer = r.closer;
-      if (r.setter && r.setter !== 'Unknown') g.setter = r.setter;
+// Greedy single-pass clustering: each item joins the first existing cluster
+// it matches (email, else phone, else fuzzy name — see priority note above),
+// otherwise starts its own. `getEmail`/`getPhone`/`getName` are accessors so
+// this works for both SRF deals and Calendly bookings. O(n^2) in distinct
+// people, not raw rows — fine at sales-team-client-list scale.
+function clusterByIdentity(items, getEmail, getName, getPhone) {
+  const clusters = []; // { email, phone, normName, items: [...] }
+  items.forEach(item => {
+    const email = String((getEmail && getEmail(item)) || '').trim().toLowerCase();
+    const phone = getPhone ? normalizePhone(getPhone(item)) : '';
+    const normName = normalizeClientName(getName(item));
+    let match;
+    if (email) {
+      match = clusters.find(c => c.email === email);
+    } else if (phone) {
+      match = clusters.find(c => c.phone === phone);
+    } else {
+      match = clusters.find(c => normName && c.normName &&
+        Math.min(normName.length, c.normName.length) >= FUZZY_NAME_MIN_LEN && nameSimilarity(normName, c.normName) >= FUZZY_NAME_THRESHOLD);
+    }
+    if (match) {
+      match.items.push(item);
+      if (!match.email && email) match.email = email;
+      if (!match.phone && phone) match.phone = phone;
+    } else {
+      clusters.push({ email: email || null, phone: phone || null, normName, items: [item] });
     }
   });
-  return Object.values(groups).filter(g => g.hasOrigin);
+  return clusters;
+}
+// Groups every SRF row by client identity (email > phone > fuzzy name — see
+// clusterByIdentity). Cash sums across ALL of a client's rows (deposit + any
+// remainder collections), but Closer/Setter attribution comes only from the
+// row where Call Outcome is "Deposit" or "Closed/Won" — remainder rows carry
+// no Setter/SDR and shouldn't override or dilute that attribution. A client
+// with no such origin row at all (never actually closed) is excluded —
+// there's no real order to average in.
+function buildAovClientTotals(srfDeals) {
+  const clusters = clusterByIdentity(srfDeals, r => r.clientEmail, r => r.client, r => r.clientPhone);
+  const groups = clusters.map(c => {
+    const g = { client: c.items[0].client, cash: 0, closer: null, setter: null, hasOrigin: false };
+    c.items.forEach(r => {
+      g.cash += r.cash;
+      if (AOV_ORIGIN_OUTCOMES.includes(r.outcome)) {
+        g.hasOrigin = true;
+        if (r.closer && r.closer !== 'Unknown') g.closer = r.closer;
+        if (r.setter && r.setter !== 'Unknown') g.setter = r.setter;
+      }
+    });
+    return g;
+  });
+  return groups.filter(g => g.hasOrigin);
 }
 // { personName: averageOrderValue } — average of each attributed client's
 // total cash collected (deposit + remainder combined), keyed by whichever
@@ -636,23 +664,10 @@ function dedupeCalendlyByPerson(rows) {
   rows.forEach(r => { (byEventType[r.eventType] = byEventType[r.eventType] || []).push(r); });
   const out = [];
   Object.values(byEventType).forEach(group => {
-    const clusters = []; // { email, normName, rows: [...] }
-    group.forEach(r => {
-      const normName = normalizeClientName(r.name);
-      const match = clusters.find(c =>
-        (r.email && c.email === r.email) ||
-        (normName && c.normName && Math.min(normName.length, c.normName.length) >= FUZZY_NAME_MIN_LEN && nameSimilarity(normName, c.normName) >= FUZZY_NAME_THRESHOLD)
-      );
-      if (match) {
-        match.rows.push(r);
-        if (!match.email && r.email) match.email = r.email;
-      } else {
-        clusters.push({ email: r.email, normName, rows: [r] });
-      }
-    });
+    const clusters = clusterByIdentity(group, r => r.email, r => r.name); // no phone field in Calendly's export
     clusters.forEach(c => {
-      const earliest = c.rows.reduce((a, b) => (a.date < b.date ? a : b));
-      out.push({ date: earliest.date, eventType: earliest.eventType, name: earliest.name, bookingCount: c.rows.length });
+      const earliest = c.items.reduce((a, b) => (a.date < b.date ? a : b));
+      out.push({ date: earliest.date, eventType: earliest.eventType, name: earliest.name, bookingCount: c.items.length });
     });
   });
   return out;
