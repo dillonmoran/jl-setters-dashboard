@@ -1,15 +1,25 @@
-// Vercel serverless function — proxies Airtable (JL Setters base) + Google Sheets
-// (Calendly) + Meta Ads so credentials never reach the browser.
+// Vercel serverless function — proxies Google Sheets (historical, pre-Sept 2026
+// data + Calendly) + Airtable (live, Sept 2026 onwards) + Meta Ads so credentials
+// never reach the browser.
 // Required env vars (set in Vercel Project Settings -> Environment Variables):
+//   GOOGLE_SERVICE_ACCOUNT_KEY   full JSON key for a service account with Viewer
+//                                 access to the Blue/Pink/Agency/Calendly sheets
 //   AIRTABLE_TOKEN               Personal Access Token, read-only, scoped to the
 //                                 JL Setters base (data.records:read, schema.bases:read)
-//   GOOGLE_SERVICE_ACCOUNT_KEY   full JSON key for a service account with Viewer
-//                                 access to the Calendly response sheet
 // Optional:
 //   META_ACCESS_TOKEN            Meta Marketing API token (ads_read) — the ad
 //                                 spend section shows "not connected" without it
 
 const { JWT } = require('google-auth-library');
+
+// Historical sheets — the team's setter/SDR/closer forms lived here through
+// August 2026, before the move to Airtable. Kept so past months stay visible.
+const SHEET_SOURCES = {
+  blue: { id: '1U0RvCd2ckuwBQDiPzCBTQ6VJW7ulwYKOjLlhHiCx6dM', range: 'Daily Submissions!A1:AL2000' },
+  pink: { id: '1zGKnIGA5BARnxx2bqtkzo_9tpNF3JpJkaq6JSfuNNvE', range: 'A1:Z2000' },
+  agency: { id: '177Mc00EUvTzrx52ZbndyrWaYbnHl6EF3G04cOn5vc8E', range: 'A1:Z2000' },
+  calendly: { id: '1Nh7WHYMd2QEJrvVNJ-aTOQxXUufbjkJ-Z2Hoo8ZFKxg', range: 'A1:Z5000' },
+};
 
 const AIRTABLE_BASE_ID = 'appYB6z0rRZ4QNbH5'; // "JL Setters" base
 const AIRTABLE_TABLES = {
@@ -18,9 +28,6 @@ const AIRTABLE_TABLES = {
   closerEod: 'tblxticPqlNq7vx0i',   // Closer EOD
   srf: 'tbl3Maf0bCgzFWeEP',         // Sales Record Form (Showed/Closed/Disqualified)
 };
-
-// Calendly bookings sheet — unrelated to the Airtable migration, left as-is.
-const CALENDLY_SOURCE = { id: '1Nh7WHYMd2QEJrvVNJ-aTOQxXUufbjkJ-Z2Hoo8ZFKxg', range: 'A1:Z5000' };
 
 // Ad accounts confirmed live under the JLSetters3 business: JG (Jack), LS (Lewis), JL Agency.
 const META_AD_ACCOUNTS = ['1487613569508490', '1676143043837220', '1446377807296882'];
@@ -105,20 +112,27 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const [dmSetterEod, sdrEod, closerEod, srf] = await Promise.all([
+    const airtablePromise = Promise.all([
       fetchAirtableTable(airtableToken, AIRTABLE_TABLES.dmSetterEod),
       fetchAirtableTable(airtableToken, AIRTABLE_TABLES.sdrEod),
       fetchAirtableTable(airtableToken, AIRTABLE_TABLES.closerEod),
       fetchAirtableTable(airtableToken, AIRTABLE_TABLES.srf),
     ]);
 
-    let calendly = [];
+    let blue = [], pink = [], agency = [], calendly = [];
     try {
       const client = getGoogleClient();
-      calendly = await fetchSheet(client, CALENDLY_SOURCE.id, CALENDLY_SOURCE.range);
-    } catch (calErr) {
-      calendly = [];
+      [blue, pink, agency, calendly] = await Promise.all([
+        fetchSheet(client, SHEET_SOURCES.blue.id, SHEET_SOURCES.blue.range),
+        fetchSheet(client, SHEET_SOURCES.pink.id, SHEET_SOURCES.pink.range),
+        fetchSheet(client, SHEET_SOURCES.agency.id, SHEET_SOURCES.agency.range),
+        fetchSheet(client, SHEET_SOURCES.calendly.id, SHEET_SOURCES.calendly.range),
+      ]);
+    } catch (sheetsErr) {
+      blue = []; pink = []; agency = []; calendly = [];
     }
+
+    const [dmSetterEod, sdrEod, closerEod, srf] = await airtablePromise;
 
     let adSpend = { connected: false, rows: [] };
     try {
@@ -128,7 +142,11 @@ module.exports = async (req, res) => {
     }
 
     res.setHeader('Cache-Control', 'no-store');
-    res.status(200).json({ dmSetterEod, sdrEod, closerEod, srf, calendly, adSpend, fetchedAt: new Date().toISOString() });
+    res.status(200).json({
+      blue, pink, agency, calendly,
+      dmSetterEod, sdrEod, closerEod, srf,
+      adSpend, fetchedAt: new Date().toISOString(),
+    });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
