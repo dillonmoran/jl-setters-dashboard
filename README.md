@@ -50,6 +50,19 @@ Calendly bookings (grouped by event type) and Meta Ads spend (ROAS/cost-per-X) a
 unrelated to the Sheets→Airtable migration and span all time unchanged, shown on
 the Overview only.
 
+## Roster — who shows up where
+
+The nav is flat (no "Webinar"/"Non-Webinar" grouping): DM Setter Activity, Closer
+Activity, SDR Activity. Who gets a card on each of those is driven by the **Role**
+field on the Airtable `Sales Team` table (`ROLE_BY_VIEW` in `public/index.html`
+maps the view to the exact Role value — `"DM Setter"`, `"Closer"`, `"SDR"`), not by
+who happens to have submitted a form. `api/data.js` fetches the whole Sales Team
+table fresh on every load, so adding a new rep there with a Role is enough for
+them to appear immediately — with zero stats until their first EOD submission —
+no code change needed. Setter Activity also shows a derived **Pitch → Booking %**
+(Calls Booked ÷ Calls Pitched) per rep and org-wide, since that isn't a raw
+Airtable field.
+
 ## Deploy (no local Node required)
 
 1. **Google service account**: enable the Google Sheets API on a Cloud project,

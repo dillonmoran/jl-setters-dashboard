@@ -38,8 +38,6 @@
   .sidebar-brand { padding: 0 8px 20px; }
   .sidebar-brand .name { font-family: var(--font-heading); font-weight: 700; font-size: 18px; }
   .sidebar-brand .sub { color: var(--green); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; margin-top: 2px; }
-  .nav-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); font-weight: 700; margin: 20px 0 6px; padding: 0 8px; }
-  .nav-label:first-of-type { margin-top: 4px; }
   .nav-item {
     display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-radius: 8px; font-size: 13px;
     color: var(--text-dim); cursor: pointer; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; font-family: var(--font-body);
@@ -269,16 +267,20 @@ const PINK_CFG = {
 };
 
 const VIEWS = [
-  { key: 'overview', section: 'OVERVIEW', label: 'JL Setters Overview', cls: '' },
-  { key: 'setters', section: 'NON-WEBINAR', label: 'Setter Activity', cls: 'blue' },
-  { key: 'closers', section: 'NON-WEBINAR', label: 'Closer Activity', cls: 'blue' },
-  { key: 'sdr', section: 'WEBINAR', label: 'SDR Activity', cls: 'pink' },
+  { key: 'overview', label: 'JL Setters Overview', cls: '' },
+  { key: 'setters', label: 'DM Setter Activity', cls: 'blue' },
+  { key: 'closers', label: 'Closer Activity', cls: 'blue' },
+  { key: 'sdr', label: 'SDR Activity', cls: 'pink' },
 ];
+// Sales Team "Role" field values, exactly as they appear in Airtable — this is
+// the roster source of truth per view, so a newly added rep shows up here (even
+// with zero submissions yet) as soon as they're added to Sales Team with a Role.
+const ROLE_BY_VIEW = { setters: 'DM Setter', closers: 'Closer', sdr: 'SDR' };
 const PERIODS = ['Day', '7D', '30D', 'Month', '3M', '6M', 'All', 'Custom'];
 
 let state = {
   legacyStream: [], legacyDialler: [],
-  dmSetterEod: [], sdrEod: [], closerEod: [], srf: [],
+  dmSetterEod: [], sdrEod: [], closerEod: [], srf: [], salesTeam: [],
   calendly: [], adSpend: { connected: false, daily: [] },
   fetchedAt: null,
   floor: '2026-01-01',
@@ -465,6 +467,17 @@ function parseSrfFunnel(records) {
     }))
     .filter(r => r.date);
 }
+// Sales Team roster — Role is a multipleSelects field, so it comes back as an
+// array of strings (e.g. ["DM Setter"]) via the REST API.
+function parseSalesTeam(records) {
+  return (records || []).map(r => ({
+    name: r.fields['Name'] || 'Unknown',
+    roles: r.fields['Role'] || [],
+  }));
+}
+function rosterForRole(role) {
+  return state.salesTeam.filter(p => (p.roles || []).includes(role)).map(p => p.name);
+}
 
 /* ============================================================
    Calendly + Meta ad spend — unrelated to the migration, span all
@@ -505,6 +518,7 @@ async function fetchData() {
     state.sdrEod = parseAirtableRows(data.sdrEod, SDR_DATE_KEY, SDR_PERSON_KEY).filter(r => r.date >= CUTOVER);
     state.closerEod = parseAirtableRows(data.closerEod, CLOSER_DATE_KEY, CLOSER_PERSON_KEY).filter(r => r.date >= CUTOVER);
     state.srf = parseSrfFunnel(data.srf).filter(r => r.date >= CUTOVER);
+    state.salesTeam = parseSalesTeam(data.salesTeam);
 
     state.calendly = parseCalendlyRows(data.calendly || []);
     state.adSpend = parseAdSpend(data.adSpend);
@@ -612,8 +626,14 @@ function fieldFmt(sums, f) {
   if (f.type === 'rating') return ratingFmt(v);
   return fmt(v);
 }
-function byPersonAgg(rows, fields) {
-  const people = [...new Set(rows.map(r => r.person))];
+// `roster`, when given, is the full list of reps who hold this role on the
+// Sales Team table — every roster name gets a card even with zero submissions
+// in range, so a newly added rep is visible immediately rather than only
+// appearing after their first EOD form. Anyone who submitted under a name not
+// on the roster (a mismatch, or Role not set yet) still shows up too.
+function byPersonAgg(rows, fields, roster) {
+  const rowPeople = [...new Set(rows.map(r => r.person))];
+  const people = roster && roster.length ? [...new Set([...roster, ...rowPeople])] : rowPeople;
   return people.map(person => {
     const personRows = rows.filter(r => r.person === person);
     return { person, count: personRows.length, sums: sumFields(personRows, fields) };
@@ -625,10 +645,6 @@ function byPersonAgg(rows, fields) {
    ============================================================ */
 function heroCard(label, text, ragKey, raw) {
   return `<div class="card hero-card"><div class="hero-label">${label}</div><div class="hero-value">${ragKey ? ragHtml(raw, ragKey, text) : text}</div></div>`;
-}
-function personCard(person, sums, fields, cls) {
-  const statRows = fields.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(sums, f)}</span></div>`).join('');
-  return `<div class="card person-card ${cls || ''}"><div class="head">${person}</div>${statRows}</div>`;
 }
 function drawLineChart(canvas, buckets, series, colors, labels) {
   const dpr = window.devicePixelRatio || 1;
@@ -692,7 +708,11 @@ function renderSetters(range) {
 
   if (current) {
     const totalsNew = sumFields(currentRows, DM_SETTER_FIELDS);
-    document.getElementById('heroGrid').innerHTML = DM_SETTER_FIELDS.map(f => heroCard(f.label, fieldFmt(totalsNew, f))).join('');
+    const pitched = fieldValue(totalsNew, DM_SETTER_FIELDS[3]); // Calls Pitched
+    const booked = fieldValue(totalsNew, DM_SETTER_FIELDS[4]); // Calls Booked
+    const pitchToBooking = pitched ? (booked / pitched) * 100 : null;
+    document.getElementById('heroGrid').innerHTML = DM_SETTER_FIELDS.map(f => heroCard(f.label, fieldFmt(totalsNew, f)))
+      .concat(heroCard('Pitch → Booking %', pct(pitchToBooking))).join('');
   } else if (legacy) {
     const t = legacyTotals(legacyRows);
     document.getElementById('heroGrid').innerHTML = [
@@ -707,9 +727,18 @@ function renderSetters(range) {
   }
   if (current) {
     body += `<div class="section-h">By Setter <span class="hint">Airtable — from 1 Sept 2026</span></div>`;
-    if (currentRows.length) {
-      const people = byPersonAgg(currentRows, DM_SETTER_FIELDS);
-      body += `<div class="person-grid">${people.map(p => personCard(p.person, p.sums, DM_SETTER_FIELDS, 'blue')).join('')}</div>`;
+    const roster = rosterForRole(ROLE_BY_VIEW.setters);
+    if (currentRows.length || roster.length) {
+      const people = byPersonAgg(currentRows, DM_SETTER_FIELDS, roster);
+      body += `<div class="person-grid">${people.map(p => {
+        const pitched = fieldValue(p.sums, DM_SETTER_FIELDS[3]);
+        const booked = fieldValue(p.sums, DM_SETTER_FIELDS[4]);
+        const pitchToBooking = pitched ? (booked / pitched) * 100 : null;
+        const rowsHtml = DM_SETTER_FIELDS.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(p.sums, f)}</span></div>`).join('');
+        return `<div class="card person-card blue"><div class="head">${p.person}</div>${rowsHtml}
+          <div class="stat-row"><span class="n">Pitch → Booking %</span><span class="v">${pct(pitchToBooking)}</span></div>
+        </div>`;
+      }).join('')}</div>`;
     } else {
       body += '<div class="empty-state">No DM Setter EOD submissions in this period.</div>';
     }
@@ -784,8 +813,9 @@ function renderClosers(range) {
   }
   if (current) {
     body += `<div class="section-h">By Closer <span class="hint">Airtable — from 1 Sept 2026</span></div>`;
-    if (eodRows.length || srfRows.length) {
-      const people = byPersonAgg(eodRows, CLOSER_FIELDS);
+    const roster = rosterForRole(ROLE_BY_VIEW.closers);
+    if (eodRows.length || srfRows.length || roster.length) {
+      const people = byPersonAgg(eodRows, CLOSER_FIELDS, roster);
       body += `<div class="person-grid">${people.map(p => {
         const personSums = p.sums;
         const srfForPerson = srfRows.filter(r => r.person === p.person);
@@ -878,8 +908,9 @@ function renderSdr(range) {
   }
   if (current) {
     body += `<div class="section-h">By SDR <span class="hint">Airtable — from 1 Sept 2026</span></div>`;
-    if (currentRows.length) {
-      const people = byPersonAgg(currentRows, SDR_FIELDS);
+    const roster = rosterForRole(ROLE_BY_VIEW.sdr);
+    if (currentRows.length || roster.length) {
+      const people = byPersonAgg(currentRows, SDR_FIELDS, roster);
       body += `<div class="person-grid">${people.map(p => {
         const funnelBody = SDR_FUNNELS.map(funnel => `<div class="substat-label">${funnel.label}</div>${funnel.fields.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(p.sums, f)}</span></div>`).join('')}`).join('');
         return `<div class="card person-card pink"><div class="head">${p.person}</div>${funnelBody}</div>`;
@@ -1032,14 +1063,9 @@ function paintOverviewCharts(range) {
    ============================================================ */
 function buildNav() {
   const wrap = document.getElementById('navWrap');
-  let html = '';
-  let lastSection = null;
-  VIEWS.forEach(v => {
-    if (v.section !== lastSection) { html += `<div class="nav-label">${v.section}</div>`; lastSection = v.section; }
-    html += `<button class="nav-item ${v.cls} ${state.viewKey === v.key ? 'active' : ''}" data-key="${v.key}">
+  const html = VIEWS.map(v => `<button class="nav-item ${v.cls} ${state.viewKey === v.key ? 'active' : ''}" data-key="${v.key}">
       <span class="bar"></span><span>${v.label}</span>
-    </button>`;
-  });
+    </button>`).join('');
   wrap.innerHTML = html;
   wrap.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => {
     state.viewKey = btn.dataset.key; render();

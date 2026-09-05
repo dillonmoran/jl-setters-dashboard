@@ -27,6 +27,7 @@ const AIRTABLE_TABLES = {
   sdrEod: 'tbl4pRg9CyiyDTk0p',      // SDR EOD (webinar-side)
   closerEod: 'tblxticPqlNq7vx0i',   // Closer EOD
   srf: 'tbl3Maf0bCgzFWeEP',         // Sales Record Form (Showed/Closed/Disqualified)
+  salesTeam: 'tblEtrSUIkpJtF684',   // Sales Team roster — "Role" field drives who shows up where
 };
 
 // Ad accounts confirmed live under the JLSetters3 business: JG (Jack), LS (Lewis), JL Agency.
@@ -117,6 +118,7 @@ module.exports = async (req, res) => {
       fetchAirtableTable(airtableToken, AIRTABLE_TABLES.sdrEod),
       fetchAirtableTable(airtableToken, AIRTABLE_TABLES.closerEod),
       fetchAirtableTable(airtableToken, AIRTABLE_TABLES.srf),
+      fetchAirtableTable(airtableToken, AIRTABLE_TABLES.salesTeam),
     ]);
 
     let blue = [], pink = [], agency = [], calendly = [];
@@ -132,7 +134,7 @@ module.exports = async (req, res) => {
       blue = []; pink = []; agency = []; calendly = [];
     }
 
-    const [dmSetterEod, sdrEod, closerEod, srf] = await airtablePromise;
+    const [dmSetterEod, sdrEod, closerEod, srf, salesTeam] = await airtablePromise;
 
     let adSpend = { connected: false, rows: [] };
     try {
@@ -144,7 +146,7 @@ module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({
       blue, pink, agency, calendly,
-      dmSetterEod, sdrEod, closerEod, srf,
+      dmSetterEod, sdrEod, closerEod, srf, salesTeam,
       adSpend, fetchedAt: new Date().toISOString(),
     });
   } catch (err) {
