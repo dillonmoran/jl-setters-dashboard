@@ -615,8 +615,47 @@ function parseCalendlyRows(rows) {
     const status = String(r[7] || '').trim().toLowerCase();
     if (status === 'cancelled' || status === 'canceled') return null;
     const eventType = String(r[1] || '').trim() || 'Unlabelled';
-    return { date, eventType };
+    const name = String(r[2] || '').trim();
+    const email = String(r[3] || '').trim().toLowerCase();
+    return { date, eventType, name, email };
   }).filter(Boolean);
+}
+// The raw Calendly export logs every booking event, including reschedules —
+// the same person can show up several times for the same event type (a real
+// example: "Aj Aj" / "AJ AJ" booked "JL Setters Strategy Call" 3 times on one
+// day). Counting raw rows overcounts "new" bookings. This collapses repeats
+// within the same event type down to one, keyed on an exact email match
+// (cheap, reliable — Calendly requires one) OR a fuzzy name match (catches
+// spelling variants like "Alex Lu" vs "Alex Lou" that don't share an email).
+// Scoped per event type deliberately: the same person booking a Discovery
+// Call and, separately, a Strategy Call is two real distinct bookings, not a
+// duplicate. The earliest date among a person's rows is kept — a reschedule
+// moves an appointment, it isn't a new lead.
+function dedupeCalendlyByPerson(rows) {
+  const byEventType = {};
+  rows.forEach(r => { (byEventType[r.eventType] = byEventType[r.eventType] || []).push(r); });
+  const out = [];
+  Object.values(byEventType).forEach(group => {
+    const clusters = []; // { email, normName, rows: [...] }
+    group.forEach(r => {
+      const normName = normalizeClientName(r.name);
+      const match = clusters.find(c =>
+        (r.email && c.email === r.email) ||
+        (normName && c.normName && Math.min(normName.length, c.normName.length) >= FUZZY_NAME_MIN_LEN && nameSimilarity(normName, c.normName) >= FUZZY_NAME_THRESHOLD)
+      );
+      if (match) {
+        match.rows.push(r);
+        if (!match.email && r.email) match.email = r.email;
+      } else {
+        clusters.push({ email: r.email, normName, rows: [r] });
+      }
+    });
+    clusters.forEach(c => {
+      const earliest = c.rows.reduce((a, b) => (a.date < b.date ? a : b));
+      out.push({ date: earliest.date, eventType: earliest.eventType, name: earliest.name, bookingCount: c.rows.length });
+    });
+  });
+  return out;
 }
 function parseAdSpend(adSpendPayload) {
   if (!adSpendPayload || !adSpendPayload.connected) return { connected: false, daily: [] };
@@ -650,7 +689,7 @@ async function fetchData() {
     state.aovBySetterOrSdr = aovByPerson(aovClientTotals, 'setter');
     state.aovOverall = aovClientTotals.length ? aovClientTotals.reduce((s, g) => s + g.cash, 0) / aovClientTotals.length : null;
 
-    state.calendly = parseCalendlyRows(data.calendly || []);
+    state.calendly = dedupeCalendlyByPerson(parseCalendlyRows(data.calendly || []));
     state.adSpend = parseAdSpend(data.adSpend);
     state.fetchedAt = new Date(data.fetchedAt);
 

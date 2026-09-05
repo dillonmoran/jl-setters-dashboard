@@ -72,6 +72,26 @@ whatever sync already populates that sheet — so no new automation is needed to
 count them; the Discord notification is just a heads-up to the team, not the
 system of record.
 
+### Deduplicating repeat/rescheduled bookings
+
+The raw Calendly export logs every booking event, including reschedules — the
+same person can appear several times for the same event type (confirmed in
+the live data: "Aj Aj"/"AJ AJ" booked "JL Setters Strategy Call" 3 times in
+one day, and "Alex Lu"/"Alex Lou" turned out to be the same person on
+different days). Counting raw rows overcounted "new" bookings — e.g. 27 raw
+rows landed on Aug 30th, but only 21 were actually distinct people.
+
+`dedupeCalendlyByPerson` (`public/index.html`) collapses this, applied once in
+`fetchData` right after parsing, so every downstream use of `state.calendly`
+(the Calls Booked figure, the Calendly Bookings table, the footer count) is
+already deduplicated — nothing else needed to change. Two rows are the same
+person if they share an exact email (cheap, reliable — Calendly requires one)
+or a fuzzy-matched name (same `nameSimilarity`/threshold as AOV client
+matching). Matching is scoped **per event type**: the same person booking a
+Discovery Call and, separately, a Strategy Call is two real distinct bookings,
+not a duplicate. Whichever row has the earliest date becomes that person's
+counted booking date — a reschedule moves an appointment, it isn't a new lead.
+
 ## Roster — who shows up where
 
 The nav is flat (no "Webinar"/"Non-Webinar" grouping): DM Setter Activity, Closer
