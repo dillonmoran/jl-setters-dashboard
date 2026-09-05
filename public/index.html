@@ -492,19 +492,70 @@ function parseSrfDeals(records) {
     }))
     .filter(r => r.client);
 }
-// Groups every SRF row by client name (trimmed, case-insensitive — an exact
-// match, deliberately not fuzzy: two similarly-spelled names are treated as
-// two different clients rather than risk silently merging different people).
-// Cash sums across ALL of a client's rows (deposit + any remainder
-// collections), but Closer/Setter attribution comes only from the row where
-// Call Outcome is "Deposit" or "Closed/Won" — remainder rows carry no
-// Setter/SDR and shouldn't override or dilute that attribution. A client with
-// no such origin row at all (never actually closed) is excluded — there's no
-// real order to average in.
+// Fuzzy client-name matching — these are free-text names typed by hand by
+// different reps on different rows (a deposit and its remainder collection
+// are rarely typed identically), so exact string matching missed real
+// matches like "Eros llanes" vs "Eros llans". Levenshtein edit distance,
+// normalized by the longer name's length, gives a 0..1 similarity score.
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prevDiag = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prevDiag : 1 + Math.min(prevDiag, dp[j], dp[j - 1]);
+      prevDiag = temp;
+    }
+  }
+  return dp[n];
+}
+function nameSimilarity(a, b) {
+  const maxLen = Math.max(a.length, b.length) || 1;
+  return 1 - levenshtein(a, b) / maxLen;
+}
+function normalizeClientName(name) { return String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+// Threshold picked to catch realistic single-letter typos/swaps ("Eros
+// llanes" vs "Eros llans" scores ~0.91) while still keeping genuinely
+// different names apart ("John" vs "John Ellis" scores ~0.4). The minimum
+// length guard stops very short names (where one edit is a huge fraction of
+// the string) from matching each other too easily.
+const FUZZY_NAME_THRESHOLD = 0.82;
+const FUZZY_NAME_MIN_LEN = 4;
+// Greedy single-pass clustering: each new name joins the first existing
+// cluster it's a close enough match for, otherwise starts its own. Good
+// enough for a sales team's client list (tens to low hundreds of names) —
+// this is O(n^2) in distinct names, not SRF rows.
+function clusterClientNames(rawNames) {
+  const clusters = []; // { normalized, members: [rawName, ...] }
+  rawNames.forEach(raw => {
+    const norm = normalizeClientName(raw);
+    if (!norm) return;
+    const match = clusters.find(c => c.normalized === norm ||
+      (Math.min(norm.length, c.normalized.length) >= FUZZY_NAME_MIN_LEN && nameSimilarity(norm, c.normalized) >= FUZZY_NAME_THRESHOLD));
+    if (match) match.members.push(raw);
+    else clusters.push({ normalized: norm, members: [raw] });
+  });
+  const clusterIndexByName = {};
+  clusters.forEach((c, idx) => c.members.forEach(raw => { clusterIndexByName[raw] = idx; }));
+  return clusterIndexByName;
+}
+// Groups every SRF row by fuzzy-matched client name. Cash sums across ALL of
+// a client's rows (deposit + any remainder collections), but Closer/Setter
+// attribution comes only from the row where Call Outcome is "Deposit" or
+// "Closed/Won" — remainder rows carry no Setter/SDR and shouldn't override or
+// dilute that attribution. A client with no such origin row at all (never
+// actually closed) is excluded — there's no real order to average in.
 function buildAovClientTotals(srfDeals) {
+  const clusterIndexByName = clusterClientNames(srfDeals.map(r => r.client));
   const groups = {};
   srfDeals.forEach(r => {
-    const key = r.client.toLowerCase();
+    const key = clusterIndexByName[r.client];
+    if (key === undefined) return;
     if (!groups[key]) groups[key] = { client: r.client, cash: 0, closer: null, setter: null, hasOrigin: false };
     const g = groups[key];
     g.cash += r.cash;

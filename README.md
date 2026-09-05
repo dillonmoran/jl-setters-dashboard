@@ -73,12 +73,16 @@ match in `public/index.html` (`buildAovClientTotals`):
 
 1. Group **every** SRF row (all-time, not clamped to the Sept cutover — a
    deposit and its remainder can straddle any date boundary) by **Client Full
-   Name**, trimmed and case-insensitive. This is an **exact** match on purpose:
-   two similarly-spelled names (a real example in the data: "Eros llanes" vs
-   "Eros llans") are treated as different clients rather than risk silently
-   merging two different people. A remainder row whose client name doesn't
-   exactly match any Deposit/Closed-Won row for that client is excluded from
-   AOV entirely — fix the name in Airtable to have it counted.
+   Name**, using fuzzy matching (`clusterClientNames`/`nameSimilarity` —
+   Levenshtein edit distance normalized by name length, threshold 0.82, names
+   under 4 characters excluded from fuzzy matching). Client names are
+   hand-typed by different reps on different rows, so exact matching missed
+   real matches: "Eros llanes" vs "Eros llans" scores ~0.91 and now merges.
+   The threshold is picked to still keep genuinely different names apart —
+   "John" vs "John Ellis" scores ~0.4 and stays separate. This is a
+   similarity heuristic, not a guarantee: if two different clients happen to
+   have very similar names, double-check the AOV numbers against Airtable
+   directly rather than trusting the merge blindly.
 2. Cash Collected sums across all of a client's rows. Closer and Setter/SDR
    attribution comes only from whichever row has Call Outcome "Deposit" or
    "Closed/Won" — a client with no such row (never actually closed) is
