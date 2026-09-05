@@ -645,7 +645,13 @@ function parseCalendlyRows(rows) {
     const eventType = String(r[1] || '').trim() || 'Unlabelled';
     const name = String(r[2] || '').trim();
     const email = String(r[3] || '').trim().toLowerCase();
-    return { date, eventType, name, email };
+    // Full raw "Created At" timestamp, kept alongside the day-truncated
+    // `date` above specifically so dedupeCalendlyByPerson can pick the true
+    // earliest row (by time, not just day) when several of a person's rows
+    // land on the same date — otherwise an arbitrary tie-break can surface
+    // the wrong row's name for the merged entry.
+    const createdAt = String(r[0] || '').trim();
+    return { date, eventType, name, email, createdAt };
   }).filter(Boolean);
 }
 // The raw Calendly export logs every booking event, including reschedules —
@@ -666,7 +672,13 @@ function dedupeCalendlyByPerson(rows) {
   Object.values(byEventType).forEach(group => {
     const clusters = clusterByIdentity(group, r => r.email, r => r.name); // no phone field in Calendly's export
     clusters.forEach(c => {
-      const earliest = c.items.reduce((a, b) => (a.date < b.date ? a : b));
+      // Compare full "Created At" timestamps, not the day-truncated `date` —
+      // several of a person's rows landing on the same day previously tied,
+      // and the tie-break picked whichever row happened to sort last,
+      // surfacing the wrong row's name for the whole merged entry (a real
+      // case: two "Tymek Swirski" bookings plus a same-email row typed under
+      // a different name got mislabeled as that other name).
+      const earliest = c.items.reduce((a, b) => ((a.createdAt || a.date) <= (b.createdAt || b.date) ? a : b));
       out.push({ date: earliest.date, eventType: earliest.eventType, name: earliest.name, bookingCount: c.items.length });
     });
   });
