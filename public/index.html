@@ -285,6 +285,16 @@ const VIEWS = [
 // the roster source of truth per view, so a newly added rep shows up here (even
 // with zero submissions yet) as soon as they're added to Sales Team with a Role.
 const ROLE_BY_VIEW = { setters: 'DM Setter', closers: 'Closer', sdr: 'SDR' };
+// Calendly event types that are webinar-attendee self-bookings — no DM
+// Setter is involved, so these never show up in DM Setter EOD's "Calls
+// Booked" field. Without folding them in here, Calls Booked undercounts
+// against Calls Taken (closers do take these calls; nobody ever logs them
+// as "booked" anywhere else). Confirmed with Dillon: "JL Setters Strategy
+// Call" is the event type webinar bookings use.
+const WEBINAR_CALENDLY_EVENT_TYPES = ['JL Setters Strategy Call'];
+function isWebinarBooking(eventType) {
+  return WEBINAR_CALENDLY_EVENT_TYPES.some(t => t.trim().toLowerCase() === String(eventType || '').trim().toLowerCase());
+}
 const PERIODS = ['Day', '7D', '30D', 'Month', '3M', '6M', 'All', 'Custom'];
 
 let state = {
@@ -1104,12 +1114,13 @@ function renderOverview(range) {
   const currentSetterTotals = sumFields(currentSetterRows, DM_SETTER_FIELDS);
   const currentCloserTotals = sumFields(currentCloserRows, CLOSER_FIELDS);
   const currentShowed = currentSrfRows.filter(r => r.showed).length;
+  const webinarBooked = state.calendly.filter(c => inRange(c.date, range.start, range.end) && isWebinarBooking(c.eventType)).length;
 
   // Legacy model had no separate "showed" metric — Taken doubled as Showed.
   // Combining eras additively is valid here because Booked/Taken/Cash/Revenue
   // are the same real-world concept in both systems, just different sources.
   const dmsSent = legacyT.dms + (fieldValue(currentSetterTotals, DM_SETTER_FIELDS[1]) || 0);
-  const booked = legacyT.booked + (fieldValue(currentSetterTotals, DM_SETTER_FIELDS[4]) || 0);
+  const booked = legacyT.booked + (fieldValue(currentSetterTotals, DM_SETTER_FIELDS[4]) || 0) + webinarBooked;
   const taken = legacyT.callsTaken + (fieldValue(currentCloserTotals, CLOSER_FIELDS[2]) || 0);
   const showed = legacyT.callsTaken + currentShowed;
   const closed = legacyT.callsClosed + (fieldValue(currentCloserTotals, CLOSER_FIELDS[3]) || 0);
@@ -1127,7 +1138,7 @@ function renderOverview(range) {
   let body = '';
   if (legacy && current) body += `<div class="section-h">Combined totals span both Google Sheets (through 31 Aug 2026) and Airtable (from 1 Sept 2026)</div>`;
 
-  body += `<div class="section-h">Funnel — Booked → Taken → Showed → Closed</div>
+  body += `<div class="section-h">Funnel — Booked → Taken → Showed → Closed <span class="hint">Booked includes ${fmt(webinarBooked)} webinar-sourced bookings (Calendly "${WEBINAR_CALENDLY_EVENT_TYPES.join('", "')}") with no DM Setter attached</span></div>
     <div class="card funnel-card"><div class="chips">
       <div class="chip-stat"><div class="lbl">Booked</div><div class="val">${fmt(booked)}</div></div>
       <div class="chip-stat"><div class="lbl">Taken</div><div class="val">${fmt(taken)}</div></div>
@@ -1146,7 +1157,7 @@ function renderOverview(range) {
   }
   body += `</div>`;
 
-  body += `<div class="section-h">Calendly Bookings <span class="hint">by event type</span></div>${renderCalendlyTable(range)}`;
+  body += `<div class="section-h">Calendly Bookings <span class="hint">by event type — "${WEBINAR_CALENDLY_EVENT_TYPES.join('", "')}" is counted in Calls Booked above</span></div>${renderCalendlyTable(range)}`;
   body += `<div class="section-h">Ad Spend</div>${renderAdSpendCard(range, revenue, booked, closed)}`;
 
   if (daysBetween(range.start, range.end) >= 2) {

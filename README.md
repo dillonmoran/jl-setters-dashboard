@@ -48,7 +48,28 @@ is a frontend-only change — add it to the relevant `*_FIELDS` config array in
 
 Calendly bookings (grouped by event type) and Meta Ads spend (ROAS/cost-per-X) are
 unrelated to the Sheets→Airtable migration and span all time unchanged, shown on
-the Overview only.
+the Overview only — **except** the webinar-booking event type, which is folded
+into Overview's "Calls Booked" (see below).
+
+## Webinar-sourced bookings (Calendly, no DM Setter)
+
+Some calls are booked directly by webinar attendees on Calendly, with no DM
+Setter involved — so they never show up in DM Setter EOD's "Calls Booked"
+field, which undercounts Calls Booked relative to Calls Taken (closers do take
+these calls; nobody logs them as booked anywhere else). `WEBINAR_CALENDLY_EVENT_TYPES`
+in `public/index.html` (currently just `"JL Setters Strategy Call"`, confirmed
+with Dillon) is folded into Overview's Calls Booked total and funnel, with a
+hint on both the funnel and the Calendly Bookings table explaining the overlap
+so it doesn't read as a duplicate. If another webinar-booking event type shows
+up later, add it to that array — no other code change needed. Note this is
+Overview-only: it isn't attributed to any DM Setter, so it deliberately doesn't
+appear in DM Setter Activity's per-rep Calls Booked numbers.
+
+There's currently no automated capture of these bookings beyond the raw
+Calendly export — the Discord notification some of them fire into isn't parsed
+anywhere. A Zapier zap connecting Calendly's webinar event type directly to
+Airtable (bypassing Discord, which is just a notification, not a record) would
+be a more robust long-term source than relying on this Calendly sheet.
 
 ## Roster — who shows up where
 
