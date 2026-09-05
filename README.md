@@ -1,61 +1,51 @@
 # JL Setters — KPI Dashboard
 
-Live KPI dashboard pulling from 3 Google Sheets (Pink, Affiliates, and Agency/Dialler
-response sheets). Polls every 30 seconds, no page reload. Time frame picker (All Time
-default, floored at 30 Apr 2026, through custom range), per-setter filtering, and three
-sections: Setter Activity, Pink Closing Performance, and Agency Dialler Activity.
+Live KPI dashboard backed by the **JL Setters** Airtable base. Polls every 30 seconds,
+no page reload. Time frame picker (Day/7D/30D/Month/3M/6M/All/Custom), and three
+sections: Setter Activity, Closer Activity, and SDR (Webinar) Activity — plus an
+Overview that rolls the funnel up and shows Calendly bookings and Meta ad spend.
 
 ## How it's built
 
 - `public/index.html` — the whole frontend (vanilla HTML/CSS/JS, no build step, no
   framework). Brand colors/fonts live as CSS variables at the top of the `<style>` block.
-- `api/data.js` — a Vercel serverless function that calls the Google Sheets API using a
-  service account. The browser never sees the credentials; it only ever talks to `/api/data`.
+- `api/data.js` — a Vercel serverless function that calls the Airtable API (setter/SDR/
+  closer/deal data) and the Google Sheets API (Calendly bookings only) using server-side
+  credentials. The browser never sees any tokens; it only ever talks to `/api/data`.
 
 ## Data sources
 
-| Section | Sheet | Notes |
+| Section | Airtable table | Fields tracked |
 |---|---|---|
-| Setter Activity | Pink + Affiliate response sheets | Combined, grouped by individual setter (Poppy, Quique, Luca, Jun) |
-| Pink Closing Performance | Pink response sheet | Only Pink currently reports cash/revenue/calls-taken data |
-| Agency — Dialler Activity | Dialler EoD Report response sheet | Cold-calling + VSL applicant funnel, separate metric set |
+| Setter Activity | `DM Setter EOD` | New Inbounds, New Outbounds, Follow-ups, Calls Pitched, Calls Booked, Hours Worked |
+| Closer Activity | `Closer EOD` + `SRF` | Cash Collected, Revenue Generated, Calls Taken, Calls Closed, plus Showed/Closed/Disqualified (formula fields on SRF) |
+| SDR Activity (Webinar) | `SDR EOD` | All 16 fields across the Pre-Webinar, Show-Not-Booked, No-Show-Webby, Replay-Watched and Triage funnels |
 
-The original "Blue" tracker (`2026 B2C KPI Tracker`) is intentionally excluded — it
-stopped receiving submissions in May 2026 and would show permanently stale numbers on
-a "live" dashboard. Re-add it later (as its own section, same pattern as the other two)
-if that team starts submitting again.
+Field selection was a deliberate, field-by-field decision (not "map what's convenient") —
+every EOD table has more fields available (compliance checkboxes like "Inbox Clear"/
+"CRM Updated", and free-text reflection notes like "Went Well Today"/"Biggest
+Bottleneck") that are intentionally **not** shown. `api/data.js` still fetches full
+records, so surfacing one of those later is a frontend-only change — add it to the
+relevant `*_FIELDS` config array in `public/index.html`.
 
-Column parsing in `public/index.html` uses fixed column **positions**, not header text —
-Google Form response sheets keep a stable column order, and the header text itself
-includes messy characters ("£", "\*", stray "?" marks) that are more fragile to match on.
+Calendly bookings (grouped by event type) and Meta Ads spend (ROAS/cost-per-X) are
+unrelated to the Airtable migration and are carried over unchanged, shown on the
+Overview only.
 
 ## Deploy (no local Node required)
 
-1. **Set up the Google service account** (one-time):
-   - Go to [console.cloud.google.com](https://console.cloud.google.com/), create/select a project.
-   - Enable the **Google Sheets API** for that project.
-   - Create a **Service Account** (IAM & Admin → Service Accounts), then add a JSON key
-     and download it.
-   - Share each of the 3 response sheets (Pink, Affiliates, Dialler EoD Report) with the
-     service account's email address (found in the JSON key as `client_email`) — Viewer
-     access is enough.
-2. Push this folder to a GitHub repo.
-3. Go to [vercel.com/new](https://vercel.com/new) and import that repo.
-4. In the project's **Settings → Environment Variables**, add:
-   - `GOOGLE_SERVICE_ACCOUNT_KEY` — paste the entire downloaded JSON key file's contents
-     as one line.
-5. Deploy — Vercel auto-detects `/public` as static and `/api` as a serverless function,
-   and installs `google-auth-library` from `package.json` automatically.
-
-## Reskinning with the real logo
-
-Swap the `.brand-mark` placeholder block in `index.html` for an `<img>` tag pointing at
-`public/logo.png` once the logo file is available. CSS variables under
-`/* BRAND TOKENS */` control the black/white palette — everything else reads from those.
+1. **Airtable**: create a Personal Access Token scoped **read-only** to the
+   `JL Setters` base (`appYB6z0rRZ4QNbH5`) — `data.records:read`, `schema.bases:read`.
+   Create one at [airtable.com/create/tokens](https://airtable.com/create/tokens).
+2. **Google service account** (Calendly only): if not already set up, enable the
+   Google Sheets API on a Cloud project, create a Service Account with a JSON key, and
+   share the Calendly response sheet with its `client_email` (Viewer access).
+3. Push this folder to a GitHub repo (already connected: `dillonmoran/jl-setters-dashboard`).
+4. In Vercel's **Settings → Environment Variables**, set `AIRTABLE_TOKEN` and
+   `GOOGLE_SERVICE_ACCOUNT_KEY` (and optionally `META_ACCESS_TOKEN`).
+5. Deploy — Vercel auto-detects `/public` as static and `/api` as a serverless function.
 
 ## Local preview
-
-No local dev server config is committed. To preview locally with Node installed:
 
 ```
 npm i -g vercel

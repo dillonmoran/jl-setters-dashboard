@@ -1,49 +1,67 @@
-// Vercel serverless function — proxies Google Sheets + Meta Ads so the
-// credentials never reach the browser.
-// Required env var:
-//   GOOGLE_SERVICE_ACCOUNT_KEY   full JSON key for a service account with
-//                                Viewer access to the 4 sheets below.
-// Optional env var (ad spend section shows "not connected" without it):
-//   META_ACCESS_TOKEN            long-lived (or System User) Meta Marketing
-//                                API token with ads_read on the 3 accounts below.
+// Vercel serverless function — proxies Airtable (JL Setters base) + Google Sheets
+// (Calendly) + Meta Ads so credentials never reach the browser.
+// Required env vars (set in Vercel Project Settings -> Environment Variables):
+//   AIRTABLE_TOKEN               Personal Access Token, read-only, scoped to the
+//                                 JL Setters base (data.records:read, schema.bases:read)
+//   GOOGLE_SERVICE_ACCOUNT_KEY   full JSON key for a service account with Viewer
+//                                 access to the Calendly response sheet
+// Optional:
+//   META_ACCESS_TOKEN            Meta Marketing API token (ads_read) — the ad
+//                                 spend section shows "not connected" without it
 
 const { JWT } = require('google-auth-library');
 
-const SOURCES = {
-  pink: { id: '1zGKnIGA5BARnxx2bqtkzo_9tpNF3JpJkaq6JSfuNNvE', range: 'A1:Z2000' },
-  affiliates: { id: '1cTZnqu1TyQvQ5LvGwls0slKCQ4JLoFWuYD21vXGp2ug', range: 'A1:Z2000' },
-  agency: { id: '177Mc00EUvTzrx52ZbndyrWaYbnHl6EF3G04cOn5vc8E', range: 'A1:Z2000' },
-  // Blue side (Jack + Lewis): setter-side + closer-side data for all 6 brand/offer
-  // blocks lives in the "Daily Submissions" tab of this sheet.
-  blue: { id: '1U0RvCd2ckuwBQDiPzCBTQ6VJW7ulwYKOjLlhHiCx6dM', range: 'Daily Submissions!A1:AL2000' },
-  calendly: { id: '1Nh7WHYMd2QEJrvVNJ-aTOQxXUufbjkJ-Z2Hoo8ZFKxg', range: 'A1:Z5000' },
+const AIRTABLE_BASE_ID = 'appYB6z0rRZ4QNbH5'; // "JL Setters" base
+const AIRTABLE_TABLES = {
+  dmSetterEod: 'tblzryPvy2w0JXGZm', // DM Setter EOD
+  sdrEod: 'tbl4pRg9CyiyDTk0p',      // SDR EOD (webinar-side)
+  closerEod: 'tblxticPqlNq7vx0i',   // Closer EOD
+  srf: 'tbl3Maf0bCgzFWeEP',         // Sales Record Form (Showed/Closed/Disqualified)
 };
 
-// Ad accounts confirmed live under the JLSetters3 business: JG (Jack), LS (Lewis),
-// JL Agency. Add more here as new accounts (Poppy, affiliates) get onboarded —
-// this is just a flat list, no per-account config needed.
+// Calendly bookings sheet — unrelated to the Airtable migration, left as-is.
+const CALENDLY_SOURCE = { id: '1Nh7WHYMd2QEJrvVNJ-aTOQxXUufbjkJ-Z2Hoo8ZFKxg', range: 'A1:Z5000' };
+
+// Ad accounts confirmed live under the JLSetters3 business: JG (Jack), LS (Lewis), JL Agency.
 const META_AD_ACCOUNTS = ['1487613569508490', '1676143043837220', '1446377807296882'];
-const RANGE_FLOOR = '2026-04-30';
 
-let cachedClient = null;
-
-function getClient() {
-  if (cachedClient) return cachedClient;
+let cachedGoogleClient = null;
+function getGoogleClient() {
+  if (cachedGoogleClient) return cachedGoogleClient;
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (!raw) throw new Error('Missing GOOGLE_SERVICE_ACCOUNT_KEY environment variable on the server.');
   const creds = JSON.parse(raw);
-  cachedClient = new JWT({
+  cachedGoogleClient = new JWT({
     email: creds.client_email,
     key: creds.private_key,
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
   });
-  return cachedClient;
+  return cachedGoogleClient;
 }
-
 async function fetchSheet(client, spreadsheetId, range) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
   const res = await client.request({ url });
   return res.data.values || [];
+}
+
+async function fetchAirtableTable(token, tableId) {
+  const records = [];
+  let offset;
+  do {
+    const url = new URL(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${tableId}`);
+    url.searchParams.set('pageSize', '100');
+    if (offset) url.searchParams.set('offset', offset);
+
+    const airtableRes = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!airtableRes.ok) {
+      const text = await airtableRes.text();
+      throw new Error(`Airtable responded ${airtableRes.status} for table ${tableId}: ${text}`);
+    }
+    const data = await airtableRes.json();
+    records.push(...data.records);
+    offset = data.offset;
+  } while (offset);
+  return records;
 }
 
 async function fetchMetaAccountSpend(accountId, token, since, until) {
@@ -68,27 +86,39 @@ async function fetchMetaAccountSpend(accountId, token, since, until) {
   }
   return rows;
 }
-
 async function fetchMetaSpend() {
   const token = process.env.META_ACCESS_TOKEN;
   if (!token) return { connected: false, rows: [] };
   const until = new Date().toISOString().slice(0, 10);
+  const since = new Date(Date.now() - 1000 * 60 * 60 * 24 * 365).toISOString().slice(0, 10); // trailing 12 months
   const perAccount = await Promise.all(
-    META_AD_ACCOUNTS.map(id => fetchMetaAccountSpend(id, token, RANGE_FLOOR, until))
+    META_AD_ACCOUNTS.map(id => fetchMetaAccountSpend(id, token, since, until))
   );
   return { connected: true, rows: perAccount.flat() };
 }
 
 module.exports = async (req, res) => {
+  const airtableToken = process.env.AIRTABLE_TOKEN;
+  if (!airtableToken) {
+    res.status(500).json({ error: 'Missing AIRTABLE_TOKEN environment variable on the server.' });
+    return;
+  }
+
   try {
-    const client = getClient();
-    const [pink, affiliates, agency, blue, calendly] = await Promise.all([
-      fetchSheet(client, SOURCES.pink.id, SOURCES.pink.range),
-      fetchSheet(client, SOURCES.affiliates.id, SOURCES.affiliates.range),
-      fetchSheet(client, SOURCES.agency.id, SOURCES.agency.range),
-      fetchSheet(client, SOURCES.blue.id, SOURCES.blue.range),
-      fetchSheet(client, SOURCES.calendly.id, SOURCES.calendly.range),
+    const [dmSetterEod, sdrEod, closerEod, srf] = await Promise.all([
+      fetchAirtableTable(airtableToken, AIRTABLE_TABLES.dmSetterEod),
+      fetchAirtableTable(airtableToken, AIRTABLE_TABLES.sdrEod),
+      fetchAirtableTable(airtableToken, AIRTABLE_TABLES.closerEod),
+      fetchAirtableTable(airtableToken, AIRTABLE_TABLES.srf),
     ]);
+
+    let calendly = [];
+    try {
+      const client = getGoogleClient();
+      calendly = await fetchSheet(client, CALENDLY_SOURCE.id, CALENDLY_SOURCE.range);
+    } catch (calErr) {
+      calendly = [];
+    }
 
     let adSpend = { connected: false, rows: [] };
     try {
@@ -98,7 +128,7 @@ module.exports = async (req, res) => {
     }
 
     res.setHeader('Cache-Control', 'no-store');
-    res.status(200).json({ pink, affiliates, agency, blue, calendly, adSpend, fetchedAt: new Date().toISOString() });
+    res.status(200).json({ dmSetterEod, sdrEod, closerEod, srf, calendly, adSpend, fetchedAt: new Date().toISOString() });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

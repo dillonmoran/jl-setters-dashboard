@@ -97,6 +97,8 @@
   .stat-row:last-child { border-bottom: none; }
   .stat-row .n { color: var(--text-dim); }
   .stat-row .v { font-weight: 700; display: flex; align-items: center; gap: 5px; }
+  .substat-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint); font-weight: 700; padding: 10px 0 3px; }
+  .substat-label:first-child { padding-top: 0; }
 
   .funnel-card, .adspend-card { padding: 18px 20px; margin-bottom: 14px; }
   .funnel-card .chips, .adspend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 10px; }
@@ -105,15 +107,10 @@
 
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   th, td { text-align: left; padding: 8px 7px; }
-  thead th { color: var(--text-faint); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--brand-border); white-space: nowrap; cursor: pointer; }
-  thead th:hover { color: var(--w-1); }
+  thead th { color: var(--text-faint); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--brand-border); white-space: nowrap; }
   tbody tr { border-bottom: 1px solid rgba(255,255,255,0.035); }
   tbody tr:hover { background: var(--brand-surface-2); }
-  tbody tr.top-row td:first-child { color: var(--w-1); font-weight: 700; }
   td.num { font-variant-numeric: tabular-nums; }
-  .medal { margin-right: 4px; }
-  .rate-bar { flex: 1; height: 5px; border-radius: 4px; background: var(--brand-surface-2); overflow: hidden; }
-  .rate-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--w-3), var(--w-1)); }
 
   .panel-grid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); gap: 14px; margin-bottom: 14px; }
   @media (max-width: 900px) { .panel-grid { grid-template-columns: 1fr; } }
@@ -144,8 +141,8 @@
     <div class="period-bar" id="periodBar"></div>
     <div class="date-inputs" id="dropdownWrap" style="display:none;"></div>
     <div class="date-inputs" id="customRangeWrap" style="display:none;">
-      <span>From</span><input type="date" id="customStart" min="2026-04-30">
-      <span>To</span><input type="date" id="customEnd" min="2026-04-30">
+      <span>From</span><input type="date" id="customStart">
+      <span>To</span><input type="date" id="customEnd">
     </div>
     <div class="range-caption" id="rangeCaption"></div>
 
@@ -164,19 +161,16 @@
 
 <script>
 /* ============================================================
-   CONFIG
+   CONFIG — field-level source of truth. Every field listed here
+   is exactly what Dillon confirmed should be tracked, per table,
+   in the field-by-field review done before this rewrite. Airtable
+   fields not listed here are still fetched by api/data.js (so
+   adding one later is a frontend-only change) but intentionally
+   not displayed.
    ============================================================ */
-const RANGE_FLOOR = '2026-04-30';
-const PALETTE = ['#ffffff', '#d9d9d9', '#adadad', '#7d7d7d', '#565656', '#3d3d3d', '#f0b429', '#6fa8ff'];
-
 const RAG = {
-  dmConvo: { red: 3, amber: 8 },
-  convoToCall: { red: 2, amber: 5 },
   showPct: { red: 65, amber: 80 },
   closePct: { red: 35, amber: 50 },
-  pickupPct: { red: 15, amber: 30 },
-  coldBookingPct: { red: 1.5, amber: 3.5 },
-  vslBookingPct: { red: 15, amber: 35 },
 };
 function ragLevel(v, key) {
   const t = RAG[key];
@@ -191,60 +185,97 @@ function ragHtml(v, key, formatted) {
   return `<span class="rag-${lvl}">${formatted}</span><span class="rag-dot rag-${lvl}-dot"></span>`;
 }
 
-const AFFILIATE_CODES = { amir: 'Amir', luca: 'Luca', quique: 'Quique', ivan: 'Ivan', jun: 'Jun', ray: 'Ray' };
-
-const EVENT_TYPE_MAP = {
-  'jl setters discovery call': { stream: 'blueB2C', closer: 'lewis', label: 'Lewis' },
-  'jl setters: discovery call': { stream: 'blueB2C', closer: 'jack', label: 'Jack' },
-  'jl setters - 1-1 discovery call': { stream: 'blueB2C', closer: 'jack', label: 'Jack' },
-  'jl setters - discovery call': { stream: 'blueAffiliateB2C', closer: null, label: 'Affiliate (untagged)' },
-  'jl agency: discovery call': { stream: 'blueAgency', closer: 'lewis', label: 'Lewis' },
-  'jl agency: 1-1 discovery call': { stream: 'blueAgency', closer: 'jack', label: 'Jack' },
-  'jl setters discovery call 1-1': { stream: 'blueAgency', closer: null, label: 'VSL' },
-  'jlsetters discovery 1-1 call': { stream: 'pinkB2C', closer: 'poppy', label: 'Poppy' },
-  'jlagency discovery call': { stream: 'pinkAgency', closer: 'poppy', label: 'Poppy' },
-};
-
-// Meta campaign-name -> stream. Longest/most-specific first. Note the
-// (?:[_\s-]|$) terminator — NOT \b, since "_" is a word character and \b
-// won't match the boundary between "C" and "_" in e.g. "BLUE_B2C_...".
-const STREAM_PATTERNS = [
-  { stream: 'blueAffiliateB2C', re: /^BLUE[_\s-]+(AFFILIATE|AFF)[_\s-]+B2C(?:[_\s-]|$)/i },
-  { stream: 'blueAffiliateAgency', re: /^BLUE[_\s-]+(AFFILIATE|AFF)[_\s-]+AGENCY(?:[_\s-]|$)/i },
-  { stream: 'pinkAffiliateB2C', re: /^PINK[_\s-]+(AFFILIATE|AFF)[_\s-]+B2C(?:[_\s-]|$)/i },
-  { stream: 'pinkAffiliateAgency', re: /^PINK[_\s-]+(AFFILIATE|AFF)[_\s-]+AGENCY(?:[_\s-]|$)/i },
-  { stream: 'blueB2C', re: /^BLUE[_\s-]+B2C(?:[_\s-]|$)/i },
-  { stream: 'blueAgency', re: /^BLUE[_\s-]+AGENCY(?:[_\s-]|$)/i },
-  { stream: 'pinkB2C', re: /^PINK[_\s-]+B2C(?:[_\s-]|$)/i },
-  { stream: 'pinkAgency', re: /^PINK[_\s-]+AGENCY(?:[_\s-]|$)/i },
-  // Verified live: a separate "JL Agency" ad account runs campaigns literally
-  // named "JL_AGENCY_" — doesn't match Blue/Pink Agency patterns above.
-  // Attributed to blueAgency as a default (same team as Jack/Lewis) — confirm.
-  { stream: 'blueAgency', re: /^JL[_\s-]+AGENCY(?:[_\s-]|$)/i },
+// DM Setter EOD — non-webinar setter activity.
+const DM_SETTER_FIELDS = [
+  { key: 'New Inbounds', label: 'New Inbounds', type: 'number' },
+  { key: 'New Outbounds', label: 'New Outbounds', type: 'number' },
+  { key: 'Follow-ups', label: 'Follow-ups', type: 'number' },
+  { key: 'Calls Pitched', label: 'Calls Pitched', type: 'number' },
+  { key: 'Calls Booked', label: 'Calls Booked', type: 'number' },
+  { key: 'Hours Worked', label: 'Hours Worked', type: 'duration' },
 ];
-function matchStream(name) {
-  for (const p of STREAM_PATTERNS) if (p.re.test(name || '')) return p.stream;
-  return null;
-}
+const DM_SETTER_PERSON_KEY = 'Name To Text';
+const DM_SETTER_DATE_KEY = 'Date';
+
+// Closer EOD — note the trailing space in "Cash Collected ", exactly as named
+// in Airtable. Merged with SRF's Showed/Closed/Disqualified formula flags.
+const CLOSER_FIELDS = [
+  { key: 'Cash Collected ', label: 'Cash Collected', type: 'currency' },
+  { key: 'Revenue Generated', label: 'Revenue Generated', type: 'currency' },
+  { key: 'Calls Taken', label: 'Calls Taken', type: 'number' },
+  { key: 'Calls Closed', label: 'Calls Closed', type: 'number' },
+];
+const CLOSER_PERSON_KEY = 'Closer name to text';
+const CLOSER_DATE_KEY = 'Date';
+const SRF_PERSON_KEY = 'Closer Name to text';
+const SRF_DATE_KEY = 'Call Date';
+
+// SDR EOD — webinar-side funnel, grouped into its own nav section per Dillon's
+// call: "we'll need a webinar tab to toggle between webinar and non-webinar
+// metrics — SDR stats are all webinar related."
+const SDR_FUNNELS = [
+  {
+    label: 'Pre-Webinar',
+    fields: [
+      { key: 'Pre-Webinar Outbound Dials Attempted', label: 'Dials Attempted', type: 'number' },
+      { key: 'Pre-Webinar Outbound Dials Conversations', label: 'Conversations', type: 'number' },
+    ],
+  },
+  {
+    label: 'Show Not Booked',
+    fields: [
+      { key: '"Show NOT booked" dials attempted', label: 'Dials Attempted', type: 'number' },
+      { key: '"Show NOT booked" calls connected', label: 'Calls Connected', type: 'number' },
+      { key: '"Show NOT booked" appointments set', label: 'Appointments Set', type: 'number' },
+      { key: 'Quality of "Show NOT booked" calls', label: 'Call Quality', type: 'rating' },
+    ],
+  },
+  {
+    label: 'No Show Webby',
+    fields: [
+      { key: '"No Show Webby" Outbound Dial Attempts', label: 'Dials Attempted', type: 'number' },
+      { key: '"No Show Webby" Outbound Dials Connected', label: 'Dials Connected', type: 'number' },
+      { key: '"No Show Webby" Replay SMS Links Sent', label: 'Replay SMS Sent', type: 'number' },
+      { key: 'Quality of "No Show Webby" calls', label: 'Call Quality', type: 'rating' },
+    ],
+  },
+  {
+    label: 'Replay Watched',
+    fields: [
+      { key: '"Replay Watched" Outbound Dials Attempted', label: 'Dials Attempted', type: 'number' },
+      { key: '"Replay Watched" Outbound Dials Connected', label: 'Dials Connected', type: 'number' },
+      { key: '"Replay Watched" Appointments Set', label: 'Appointments Set', type: 'number' },
+    ],
+  },
+  {
+    label: 'Triage',
+    fields: [
+      { key: 'Triages Attempted', label: 'Attempted', type: 'number' },
+      { key: 'Triages Connected (Made)', label: 'Connected', type: 'number' },
+      { key: 'Triage Call Quality', label: 'Call Quality', type: 'rating' },
+    ],
+  },
+];
+const SDR_FIELDS = SDR_FUNNELS.flatMap(f => f.fields);
+const SDR_PERSON_KEY = 'SDR name to text';
+const SDR_DATE_KEY = 'Date';
 
 const VIEWS = [
-  { key: 'overview', section: 'OVERVIEW', label: 'JL Setters Overview', cls: '', streams: null, showDialler: true },
-  { key: 'blueOverview', section: 'BLUE', label: 'Blue Overview', cls: 'blue', streams: ['blueB2C', 'blueAgency', 'blueAffiliateB2C', 'blueAffiliateAgency'], showDialler: true },
-  { key: 'blueB2C', section: 'BLUE', label: 'Blue B2C', cls: 'blue', streams: ['blueB2C'] },
-  { key: 'blueAgency', section: 'BLUE', label: 'Blue Agency', cls: 'blue', streams: ['blueAgency'], showDialler: true },
-  { key: 'pinkOverview', section: 'PINK', label: 'Pink Overview', cls: 'pink', streams: ['pinkB2C', 'pinkAgency', 'pinkAffiliateB2C', 'pinkAffiliateAgency'] },
-  { key: 'pinkB2C', section: 'PINK', label: 'Pink B2C', cls: 'pink', streams: ['pinkB2C'] },
-  { key: 'pinkAgency', section: 'PINK', label: 'Pink Agency', cls: 'pink', streams: ['pinkAgency'] },
+  { key: 'overview', section: 'OVERVIEW', label: 'JL Setters Overview', cls: '' },
+  { key: 'setters', section: 'NON-WEBINAR', label: 'Setter Activity', cls: 'blue' },
+  { key: 'closers', section: 'NON-WEBINAR', label: 'Closer Activity', cls: 'blue' },
+  { key: 'sdr', section: 'WEBINAR', label: 'SDR Activity', cls: 'pink' },
 ];
-const PERIODS = ['Day', '7D', '30D', 'Month', '3M', '6M', '9M', '12M', 'Custom'];
+const PERIODS = ['Day', '7D', '30D', 'Month', '3M', '6M', 'All', 'Custom'];
 
 let state = {
-  rows: [], dialler: [], calendly: [], adSpend: { connected: false, byStream: {}, untagged: 0, daily: [] },
+  dmSetterEod: [], sdrEod: [], closerEod: [], srf: [], calendly: [],
+  adSpend: { connected: false, rows: [] },
   fetchedAt: null,
+  floor: '2026-01-01',
   viewKey: 'overview',
   period: '30D', selDay: null, selMonth: null,
   customStart: null, customEnd: null,
-  leaderboardSort: { key: 'booked', dir: 'desc' },
 };
 
 /* ============================================================
@@ -254,19 +285,22 @@ function fmt(n) { if (n === null || n === undefined || isNaN(n)) return '—'; r
 function pct(n) { if (n === null || n === undefined || !isFinite(n) || isNaN(n)) return '—'; return n.toFixed(1) + '%'; }
 function gbp(n) { if (n === null || n === undefined || isNaN(n)) return '—'; return '£' + Math.round(n).toLocaleString(); }
 function roas(n) { if (n === null || n === undefined || !isFinite(n) || isNaN(n)) return '—'; return n.toFixed(2) + 'x'; }
+function durationFmt(sec) {
+  if (sec === null || sec === undefined || isNaN(sec)) return '—';
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+function ratingFmt(n) { if (n === null || n === undefined || isNaN(n)) return '—'; return n.toFixed(1) + '/5'; }
 function num(v) {
   if (v === null || v === undefined || v === '') return null;
-  const cleaned = String(v).replace(/[£$€,]/g, '').replace(/ /g, ' ').trim();
+  if (typeof v === 'number') return v;
+  const cleaned = String(v).replace(/[£$€,]/g, '').trim();
   const f = parseFloat(cleaned);
   return isNaN(f) ? null : f;
 }
-// Deliberately uses LOCAL getters, not toISOString(). Date objects in this
-// file are built from local-time arithmetic (new Date(y,m,d), setDate(),
-// "T00:00:00" parsing) — toISOString() forces UTC, which silently shifts the
-// date back a day for anyone in a positive UTC offset (e.g. UK on BST is
-// UTC+1: local midnight 31 Jul becomes 30 Jul 23:00 UTC, truncating the last
-// day of every month/range for those users). This was cutting real activity
-// out of "Month" and other range views.
+// Deliberately uses LOCAL getters, not toISOString() — see original dashboard's
+// note on this: toISOString() forces UTC, which silently truncates the last
+// day of a month/range for anyone in a positive UTC offset (e.g. UK on BST).
 function toISO(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -293,154 +327,65 @@ function parseFlexDate(str) {
 function inRange(dateStr, start, end) { return !!dateStr && dateStr >= start && dateStr <= end; }
 function daysBetween(start, end) { const s = new Date(start + 'T00:00:00'), e = new Date(end + 'T00:00:00'); return Math.round((e - s) / 86400000) + 1; }
 
-// §3.1 submitter classification — normalise apostrophes, priority order.
-function classifySubmitter(raw) {
-  const s = String(raw || '').replace(/[’'`]/g, '').trim().toLowerCase();
-  if (s.includes('affiliate') || s.includes('(aff)') || s.includes(' aff)')) return { person: 'affiliate', display: 'Affiliate Data' };
-  if (s.includes('jacks setter') || s.includes('jack setter') || s.includes('jg setter')) return { person: 'jack', display: "Jack's Setter" };
-  if (s.includes('lewiss setter') || s.includes('lewis setter') || s.includes('ls setter')) return { person: 'lewis', display: "Lewis' Setter" };
-  if (s.includes('poppys setter') || s.includes('poppy setter')) return { person: 'poppy', display: "Poppy's Setter" };
-  if (s.includes('jack glover')) return { person: 'jack', display: 'Jack Glover' };
-  if (s.includes('lewis sheehy')) return { person: 'lewis', display: 'Lewis Sheehy' };
-  if (s.includes('poppy daniels') || s.includes('poppy')) return { person: 'poppy', display: 'Poppy Daniels' };
-  return { person: null, display: raw ? String(raw).trim() : 'Unknown' };
-}
-function extractAffiliateName(raw) {
-  const m = String(raw || '').match(/^(.+?)[’']?s?\s+Setter/i);
-  return (m ? m[1] : String(raw || '')).trim() || 'Unknown';
+function personFrom(fields, key) {
+  const v = fields[key];
+  if (Array.isArray(v)) return v.length ? String(v[0]).trim() : 'Unknown';
+  return v ? String(v).trim() : 'Unknown';
 }
 
 /* ============================================================
-   §2.1/§2.2/§2.3 — wide-format sheet unpivoter (shared by Blue,
-   Pink, and Affiliates; column config differs per sheet). Column
-   presence decides emission — NOT the submitter's declared role —
-   so a row that happens to have both setter- and closer-side data
-   filled in produces both kinds of stream-rows.
+   AIRTABLE PARSING — dates come back as clean ISO strings
+   ("YYYY-MM-DD") directly from Airtable, no UK-date parsing needed.
    ============================================================ */
-function unpivotWideRow(r, cfg, personOverride) {
-  const date = parseUKDate(r[2]);
-  if (!date || date < RANGE_FLOOR) return [];
-  const cls = personOverride ? personOverride(r) : classifySubmitter(r[1]);
-  const out = [];
-
-  const activeBookings = cfg.bookingBlocks
-    .map(b => ({ stream: b.stream, unq: num(r[b.unqCol]) || 0, ql: num(r[b.qlCol]) || 0 }))
-    .filter(b => b.unq || b.ql);
-  const hasWideContext = ['follows', 'inbound', 'qls', 'dms', 'convos'].some((_, i) => (num(r[3 + i]) || 0) > 0);
-  if (activeBookings.length || hasWideContext) {
-    const streams = activeBookings.length ? activeBookings : [{ stream: cfg.bookingBlocks[0].stream, unq: 0, ql: 0 }];
-    streams.forEach((b, i) => {
-      out.push({
-        date, stream: b.stream, kind: 'setter', person: cls.person, displayName: cls.display,
-        affiliateName: cls.affiliateName || null,
-        follows: i === 0 ? (num(r[3]) || 0) : 0,
-        inboundLeads: i === 0 ? (num(r[4]) || 0) : 0,
-        qls: i === 0 ? (num(r[5]) || 0) : 0,
-        dms: i === 0 ? (num(r[6]) || 0) : 0,
-        convos: i === 0 ? (num(r[7]) || 0) : 0,
-        unqBooked: b.unq, qlBooked: b.ql,
-        callsTaken: 0, callsClosed: 0, cashCollected: 0, revenue: 0,
-      });
-    });
-  }
-
-  cfg.closerBlocks.forEach(b => {
-    const [ti, ci, ki, ri] = b.idx;
-    const taken = num(r[ti]) || 0, closed = num(r[ci]) || 0, cash = num(r[ki]) || 0, rev = num(r[ri]) || 0;
-    if (taken || closed || cash || rev) {
-      out.push({
-        date, stream: b.stream, kind: 'closer', person: cls.person, displayName: cls.display,
-        follows: 0, inboundLeads: 0, qls: 0, dms: 0, convos: 0, unqBooked: 0, qlBooked: 0,
-        callsTaken: taken, callsClosed: closed, cashCollected: cash, revenue: rev,
-      });
-    }
-  });
-  return out;
+function parseAirtableRows(records, dateKey, personKey) {
+  return (records || [])
+    .map(r => ({
+      id: r.id,
+      date: r.fields[dateKey] ? String(r.fields[dateKey]).slice(0, 10) : null,
+      person: personFrom(r.fields, personKey),
+      fields: r.fields,
+    }))
+    .filter(r => r.date);
 }
-
-const BLUE_CFG = {
-  bookingBlocks: [{ stream: 'blueB2C', unqCol: 8, qlCol: 9 }, { stream: 'blueAgency', unqCol: 34, qlCol: 35 }],
-  closerBlocks: [
-    { stream: 'blueB2C', idx: [10, 11, 12, 13] },
-    { stream: 'blueAgency', idx: [14, 15, 16, 17] },
-    { stream: 'blueAffiliateB2C', idx: [18, 19, 20, 21] },
-    { stream: 'blueAffiliateAgency', idx: [22, 23, 24, 25] },
-    { stream: 'pinkB2C', idx: [26, 27, 28, 29] },
-    { stream: 'pinkAgency', idx: [30, 31, 32, 33] },
-  ],
-};
-const PINK_CFG = {
-  bookingBlocks: [{ stream: 'pinkB2C', unqCol: 8, qlCol: 9 }, { stream: 'pinkAgency', unqCol: 18, qlCol: 19 }],
-  closerBlocks: [{ stream: 'pinkB2C', idx: [10, 11, 12, 13] }, { stream: 'pinkAgency', idx: [14, 15, 16, 17] }],
-};
-const AFFILIATE_CFG = {
-  bookingBlocks: [{ stream: 'blueAffiliateB2C', unqCol: 8, qlCol: 9 }, { stream: 'blueAffiliateAgency', unqCol: 10, qlCol: 11 }],
-  closerBlocks: [],
-};
-
-function parseBlueRows(rows) { return rows.slice(1).flatMap(r => unpivotWideRow(r, BLUE_CFG)); }
-function parsePinkRows(rows) { return rows.slice(1).flatMap(r => unpivotWideRow(r, PINK_CFG)); }
-function parseAffiliateRows(rows) {
-  return rows.slice(1).flatMap(r => unpivotWideRow(r, AFFILIATE_CFG, row => {
-    const name = extractAffiliateName(row[1]);
-    return { person: 'affiliate', display: name, affiliateName: name };
-  }));
+function parseSrfFunnel(records) {
+  return (records || [])
+    .map(r => ({
+      id: r.id,
+      date: r.fields[SRF_DATE_KEY] ? String(r.fields[SRF_DATE_KEY]).slice(0, 10) : null,
+      person: personFrom(r.fields, SRF_PERSON_KEY),
+      showed: !!r.fields['Showed'],
+      closed: !!r.fields['Closed'],
+      disqualified: !!r.fields['Disqualified'],
+    }))
+    .filter(r => r.date);
 }
 
 /* ============================================================
-   §2.5 Dialler EoD parser
+   §Calendly parser — bookings grouped by raw event type. No more
+   stream mapping: the old Blue/Pink column-block model doesn't
+   exist in the Airtable data, so this is just a flat count.
    ============================================================ */
-function parseDiallerRows(rows) {
-  return rows.slice(1).map(r => {
-    const date = parseUKDate(r[2]);
-    if (!date || date < RANGE_FLOOR) return null;
-    return {
-      date, dials: num(r[3]) || 0, pickUps: num(r[4]) || 0, voicemails: num(r[5]) || 0, noAnswers: num(r[6]) || 0,
-      cold1st: num(r[7]) || 0, cold2nd: num(r[8]) || 0, coldNotInterested: num(r[9]) || 0, coldBooked: num(r[10]) || 0,
-      vslCalled: num(r[11]) || 0, vslUnqualified: num(r[12]) || 0, vsl1stMissed: num(r[13]) || 0, vsl2ndMissed: num(r[14]) || 0,
-      vslBooked: num(r[15]) || 0, totalCallsBooked: num(r[16]) || 0, whatsappGroups: num(r[17]) || 0, noShowsRebooked: num(r[18]) || 0,
-    };
-  }).filter(Boolean);
-}
-
-/* ============================================================
-   §2.4 Calendly parser
-   ============================================================ */
-function normEventType(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
 function parseCalendlyRows(rows) {
   return rows.slice(1).map(r => {
     const date = parseFlexDate(r[0]);
-    if (!date || date < RANGE_FLOOR) return null;
+    if (!date) return null;
     const status = String(r[7] || '').trim().toLowerCase();
     if (status === 'cancelled' || status === 'canceled') return null;
-    const utmSource = String(r[4] || '').trim();
-    const eventType = String(r[1] || '').trim();
-    if (utmSource) {
-      const name = AFFILIATE_CODES[utmSource.toLowerCase()] || utmSource;
-      const stream = /agency/i.test(eventType) ? 'blueAffiliateAgency' : 'blueAffiliateB2C';
-      return { date, stream, closer: null, sourceLabel: name, eventType };
-    }
-    const mapped = EVENT_TYPE_MAP[normEventType(eventType)];
-    if (!mapped) return { date, stream: null, closer: null, sourceLabel: 'Unmapped: ' + (eventType || '—'), eventType };
-    return { date, stream: mapped.stream, closer: mapped.closer, sourceLabel: mapped.label, eventType };
+    const eventType = String(r[1] || '').trim() || 'Unlabelled';
+    return { date, eventType };
   }).filter(Boolean);
 }
 
 /* ============================================================
-   §2.6 Meta ad spend
+   §Meta ad spend — flat total, no stream attribution (that model
+   doesn't apply to the new Airtable-backed data).
    ============================================================ */
 function parseAdSpend(adSpendPayload) {
-  if (!adSpendPayload || !adSpendPayload.connected) return { connected: false, byStream: {}, untagged: 0, daily: [] };
-  const byStream = {}; let untagged = 0; const daily = [];
-  (adSpendPayload.rows || []).forEach(r => {
-    if (!r.date || r.date < RANGE_FLOOR) return;
-    const stream = matchStream(r.campaign);
-    const spend = num(r.spend) || 0;
-    if (!stream) { untagged += spend; return; }
-    byStream[stream] = (byStream[stream] || 0) + spend;
-    daily.push({ date: r.date, stream, spend });
-  });
-  return { connected: true, byStream, untagged, daily };
+  if (!adSpendPayload || !adSpendPayload.connected) return { connected: false, daily: [] };
+  const daily = (adSpendPayload.rows || [])
+    .filter(r => r.date)
+    .map(r => ({ date: r.date, spend: num(r.spend) || 0 }));
+  return { connected: true, daily };
 }
 
 /* ============================================================
@@ -452,34 +397,41 @@ async function fetchData() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
 
-    // Affiliates never submit daily KPI forms, so their setter-side rows are
-    // intentionally excluded from the dashboard entirely (parseAffiliateRows
-    // is left defined below in case that changes later). Affiliate-*sourced*
-    // revenue that a closer books against blueAffiliateB2C/Agency is a
-    // different data path (from the Blue sheet's closer blocks) and is
-    // unaffected — that's real closer-attributed revenue, not a KPI submission.
-    state.rows = [...parseBlueRows(data.blue || []), ...parsePinkRows(data.pink || [])];
-    state.dialler = parseDiallerRows(data.agency || []);
+    state.dmSetterEod = parseAirtableRows(data.dmSetterEod, DM_SETTER_DATE_KEY, DM_SETTER_PERSON_KEY);
+    state.sdrEod = parseAirtableRows(data.sdrEod, SDR_DATE_KEY, SDR_PERSON_KEY);
+    state.closerEod = parseAirtableRows(data.closerEod, CLOSER_DATE_KEY, CLOSER_PERSON_KEY);
+    state.srf = parseSrfFunnel(data.srf);
     state.calendly = parseCalendlyRows(data.calendly || []);
     state.adSpend = parseAdSpend(data.adSpend);
     state.fetchedAt = new Date(data.fetchedAt);
 
-    setLive(true);
+    const allDatesFound = [
+      ...state.dmSetterEod, ...state.sdrEod, ...state.closerEod, ...state.srf,
+    ].map(r => r.date).filter(Boolean).sort();
+    if (allDatesFound.length) state.floor = allDatesFound[0];
+
+    const totalRows = state.dmSetterEod.length + state.sdrEod.length + state.closerEod.length + state.srf.length;
+    setLive(true, totalRows);
     render();
   } catch (err) {
-    setLive(false, err.message);
+    setLive(false, 0, err.message);
   }
 }
-function setLive(ok, message) {
+function setLive(ok, totalRows, message) {
   const dot = document.getElementById('liveDot'); const label = document.getElementById('liveLabel');
-  if (ok) { dot.classList.remove('stale'); label.textContent = 'Live · ' + state.rows.length + ' rows'; }
+  if (ok) { dot.classList.remove('stale'); label.textContent = 'Live · ' + totalRows + ' submissions'; }
   else { dot.classList.add('stale'); label.textContent = 'Connection issue'; document.getElementById('footer').textContent = 'Error: ' + message; }
 }
 
 /* ============================================================
    TIME PERIOD
    ============================================================ */
-function allDates() { return [...new Set(state.rows.map(r => r.date))].sort(); }
+function allDates() {
+  const dates = [
+    ...state.dmSetterEod, ...state.sdrEod, ...state.closerEod, ...state.srf,
+  ].map(r => r.date);
+  return [...new Set(dates)].sort();
+}
 function allMonths() { return [...new Set(allDates().map(d => d.slice(0, 7)))].sort(); }
 function currentRange() {
   const dates = allDates();
@@ -491,15 +443,16 @@ function currentRange() {
   if (state.period === 'Month') {
     const m = state.selMonth || (allMonths().slice(-1)[0] || today.slice(0, 7));
     const [my, mm] = m.split('-').map(Number);
-    const lastDayOfMonth = toISO(new Date(my, mm, 0)); // day 0 of next month = last day of this one
+    const lastDayOfMonth = toISO(new Date(my, mm, 0));
     return { start: m + '-01', end: today.slice(0, 7) === m ? today : lastDayOfMonth };
   }
-  if (['3M', '6M', '9M', '12M'].includes(state.period)) {
-    const months = { '3M': 3, '6M': 6, '9M': 9, '12M': 12 }[state.period];
+  if (['3M', '6M'].includes(state.period)) {
+    const months = { '3M': 3, '6M': 6 }[state.period];
     const s = new Date(todayD); s.setMonth(s.getMonth() - months); s.setDate(s.getDate() + 1);
-    return { start: toISO(s) < RANGE_FLOOR ? RANGE_FLOOR : toISO(s), end: today };
+    return { start: toISO(s) < state.floor ? state.floor : toISO(s), end: today };
   }
-  if (state.period === 'Custom') return { start: state.customStart || RANGE_FLOOR, end: state.customEnd || today };
+  if (state.period === 'All') return { start: state.floor, end: today };
+  if (state.period === 'Custom') return { start: state.customStart || state.floor, end: state.customEnd || today };
   const s = new Date(todayD); s.setDate(s.getDate() - 29); return { start: toISO(s), end: today };
 }
 function rangeLabel(start, end) {
@@ -516,64 +469,41 @@ function buildBuckets(start, end) {
 }
 
 /* ============================================================
-   AGGREGATION — filter rows for the current view + range + toggle
+   AGGREGATION
    ============================================================ */
-function currentView() { return VIEWS.find(v => v.key === state.viewKey) || VIEWS[0]; }
-function filterRows(rows, view, range) {
-  let recs = rows.filter(r => inRange(r.date, range.start, range.end));
-  if (view.streams) recs = recs.filter(r => view.streams.includes(r.stream));
-  return recs;
-}
-function totals(recs) {
-  return recs.reduce((a, r) => {
-    a.follows += r.follows; a.inboundLeads += r.inboundLeads; a.qls += r.qls; a.dms += r.dms; a.convos += r.convos;
-    a.booked += r.unqBooked + r.qlBooked; a.callsTaken += r.callsTaken; a.callsClosed += r.callsClosed;
-    a.cash += r.cashCollected; a.revenue += r.revenue;
-    return a;
-  }, { follows: 0, inboundLeads: 0, qls: 0, dms: 0, convos: 0, booked: 0, callsTaken: 0, callsClosed: 0, cash: 0, revenue: 0 });
-}
-const SETTER_LABELS = { jack: "Jack's Setter", lewis: "Lewis' Setter", poppy: "Poppy's Setter" };
-function byPerson(recs) {
-  const map = {};
-  recs.filter(r => r.kind === 'setter').forEach(r => {
-    const key = r.person || r.displayName;
-    // Setter cards always use the setter-identity label (e.g. "Lewis' Setter"),
-    // never a closer-kind row's displayName ("Lewis Sheehy") — same person can
-    // submit both roles, and whichever row is encountered first shouldn't decide
-    // the label on a card that's specifically about setter activity.
-    const label = SETTER_LABELS[r.person] || r.displayName;
-    if (!map[key]) map[key] = { key, person: r.person, displayName: label, follows: 0, inboundLeads: 0, qls: 0, dms: 0, convos: 0, unqBooked: 0, qlBooked: 0 };
-    const t = map[key];
-    t.follows += r.follows; t.inboundLeads += r.inboundLeads; t.qls += r.qls; t.dms += r.dms; t.convos += r.convos;
-    t.unqBooked += r.unqBooked; t.qlBooked += r.qlBooked;
+function inRangeRows(rows, range) { return rows.filter(r => inRange(r.date, range.start, range.end)); }
+
+function sumFields(rows, fields) {
+  const out = {};
+  fields.forEach(f => { out[f.key] = f.type === 'rating' ? { sum: 0, count: 0 } : 0; });
+  rows.forEach(r => {
+    fields.forEach(f => {
+      const v = num(r.fields[f.key]);
+      if (v === null) return;
+      if (f.type === 'rating') { out[f.key].sum += v; out[f.key].count += 1; }
+      else out[f.key] += v;
+    });
   });
-  return Object.values(map).map(t => ({ ...t, booked: t.unqBooked + t.qlBooked }));
+  return out;
 }
-function byCloser(recs) {
-  const map = {};
-  recs.forEach(r => {
-    if (r.kind !== 'closer' || !r.person) return;
-    if (!map[r.person]) map[r.person] = { person: r.person, callsTaken: 0, callsClosed: 0, cash: 0, revenue: 0 };
-    const t = map[r.person];
-    t.callsTaken += r.callsTaken; t.callsClosed += r.callsClosed; t.cash += r.cashCollected; t.revenue += r.revenue;
-  });
-  return Object.values(map);
+function fieldValue(sums, f) {
+  if (f.type === 'rating') return sums[f.key].count ? sums[f.key].sum / sums[f.key].count : null;
+  return sums[f.key];
 }
-const CLOSER_LABELS = { jack: 'Jack Glover', lewis: 'Lewis Sheehy', poppy: 'Poppy Daniels' };
-function adSpendForView(view) {
-  if (!state.adSpend.connected) return null;
-  const { start, end } = currentRange();
-  const dailyInRange = state.adSpend.daily.filter(d => inRange(d.date, start, end));
-  const streams = view.streams || Object.keys(state.adSpend.byStream);
-  const spend = dailyInRange.filter(d => streams.includes(d.stream)).reduce((s, d) => s + d.spend, 0);
-  return spend;
+function fieldFmt(sums, f) {
+  const v = fieldValue(sums, f);
+  if (f.type === 'currency') return gbp(v);
+  if (f.type === 'duration') return durationFmt(v);
+  if (f.type === 'rating') return ratingFmt(v);
+  return fmt(v);
 }
-function calendlyForView(view, range) {
-  let recs = state.calendly.filter(c => inRange(c.date, range.start, range.end));
-  if (view.streams) recs = recs.filter(c => view.streams.includes(c.stream));
-  return recs;
+function byPersonAgg(rows, fields) {
+  const people = [...new Set(rows.map(r => r.person))];
+  return people.map(person => {
+    const personRows = rows.filter(r => r.person === person);
+    return { person, count: personRows.length, sums: sumFields(personRows, fields) };
+  }).sort((a, b) => b.count - a.count);
 }
-function diallerForRange(range) { return state.dialler.filter(d => inRange(d.date, range.start, range.end)); }
 
 /* ============================================================
    NAV + PERIOD CONTROLS
@@ -616,8 +546,10 @@ function buildPeriodBar() {
     document.getElementById('monthSelect').addEventListener('change', e => { state.selMonth = e.target.value; render(); });
   } else if (state.period === 'Custom') {
     customWrap.style.display = 'flex';
-    if (!state.customStart) state.customStart = RANGE_FLOOR;
-    if (!state.customEnd) state.customEnd = allDates().slice(-1)[0] || RANGE_FLOOR;
+    if (!state.customStart) state.customStart = state.floor;
+    if (!state.customEnd) state.customEnd = allDates().slice(-1)[0] || state.floor;
+    document.getElementById('customStart').min = state.floor;
+    document.getElementById('customEnd').min = state.floor;
     document.getElementById('customStart').value = state.customStart;
     document.getElementById('customEnd').value = state.customEnd;
   }
@@ -627,149 +559,15 @@ document.getElementById('customEnd').addEventListener('change', e => { state.cus
 document.getElementById('refreshBtn').addEventListener('click', fetchData);
 
 /* ============================================================
-   RENDER
+   RENDER — shared pieces
    ============================================================ */
-function heroCard(label, value, ragKey) {
-  return `<div class="card hero-card"><div class="hero-label">${label}</div><div class="hero-value">${ragKey ? ragHtml(value.raw, ragKey, value.text) : value.text}</div></div>`;
+function heroCard(label, text, ragKey, raw) {
+  return `<div class="card hero-card"><div class="hero-label">${label}</div><div class="hero-value">${ragKey ? ragHtml(raw, ragKey, text) : text}</div></div>`;
 }
-function renderHero(t, spend) {
-  const showPct = t.booked ? (t.callsTaken / t.booked) * 100 : null;
-  const closePct = t.callsTaken ? (t.callsClosed / t.callsTaken) * 100 : null;
-  const cashRoas = spend ? t.cash / spend : null;
-  const revRoas = spend ? t.revenue / spend : null;
-  const cards = [
-    heroCard('Calls Booked', { text: fmt(t.booked) }),
-    heroCard('Calls Taken', { text: fmt(t.callsTaken) }),
-    heroCard('Show %', { text: pct(showPct), raw: showPct }, 'showPct'),
-    heroCard('Calls Closed', { text: fmt(t.callsClosed) }),
-    heroCard('Close %', { text: pct(closePct), raw: closePct }, 'closePct'),
-    heroCard('Cash Collected', { text: gbp(t.cash) }),
-    heroCard('Revenue Generated', { text: gbp(t.revenue) }),
-    heroCard('Cash ROAS', { text: spend ? roas(cashRoas) : '—' }),
-    heroCard('Revenue ROAS', { text: spend ? roas(revRoas) : '—' }),
-  ];
-  document.getElementById('heroGrid').innerHTML = cards.join('');
+function personCard(person, rows, sums, fields, cls) {
+  const statRows = fields.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(sums, f)}</span></div>`).join('');
+  return `<div class="card person-card ${cls || ''}"><div class="head">${person}</div>${statRows}</div>`;
 }
-
-function renderByPerson(recs, view) {
-  const people = byPerson(recs).sort((a, b) => b.booked - a.booked);
-  if (!people.length) return '<div class="empty-state">No setter submissions in this scope/period.</div>';
-  return `<div class="person-grid">${people.map(p => {
-    const dmConvo = p.dms ? (p.convos / p.dms) * 100 : null;
-    const convoCall = p.convos ? (p.booked / p.convos) * 100 : null;
-    const cls = ['blueB2C','blueAgency'].some(s=>(view.streams||[]).includes(s)) ? 'blue' : (['pinkB2C','pinkAgency'].some(s=>(view.streams||[]).includes(s)) ? 'pink' : '');
-    return `<div class="card person-card ${cls}">
-      <div class="head">${p.displayName}</div>
-      <div class="stat-row"><span class="n">Follows</span><span class="v">${fmt(p.follows)}</span></div>
-      <div class="stat-row"><span class="n">Inbound</span><span class="v">${fmt(p.inboundLeads)}</span></div>
-      <div class="stat-row"><span class="n">QLs</span><span class="v">${fmt(p.qls)}</span></div>
-      <div class="stat-row"><span class="n">DMs</span><span class="v">${fmt(p.dms)}</span></div>
-      <div class="stat-row"><span class="n">DM → Convo %</span><span class="v">${ragHtml(dmConvo, 'dmConvo', pct(dmConvo))}</span></div>
-      <div class="stat-row"><span class="n">Convos</span><span class="v">${fmt(p.convos)}</span></div>
-      <div class="stat-row"><span class="n">Convo → Call %</span><span class="v">${ragHtml(convoCall, 'convoToCall', pct(convoCall))}</span></div>
-      <div class="stat-row"><span class="n">Unq Appt Booked</span><span class="v">${fmt(p.unqBooked)}</span></div>
-      <div class="stat-row"><span class="n">QL Appt Booked</span><span class="v">${fmt(p.qlBooked)}</span></div>
-      <div class="stat-row"><span class="n">Calls Booked</span><span class="v">${fmt(p.booked)}</span></div>
-    </div>`;
-  }).join('')}</div>`;
-}
-
-function renderByCloser(recs) {
-  const closers = byCloser(recs).filter(c => c.callsTaken || c.callsClosed || c.cash || c.revenue);
-  if (!closers.length) return '<div class="empty-state">No closing activity in this scope/period.</div>';
-  return `<div class="person-grid">${closers.map(c => {
-    const closePct = c.callsTaken ? (c.callsClosed / c.callsTaken) * 100 : null;
-    const avgDeal = c.callsClosed ? c.revenue / c.callsClosed : null;
-    return `<div class="card person-card">
-      <div class="head">${CLOSER_LABELS[c.person] || c.person}</div>
-      <div class="stat-row"><span class="n">Calls Taken</span><span class="v">${fmt(c.callsTaken)}</span></div>
-      <div class="stat-row"><span class="n">Calls Closed</span><span class="v">${fmt(c.callsClosed)}</span></div>
-      <div class="stat-row"><span class="n">Close %</span><span class="v">${ragHtml(closePct, 'closePct', pct(closePct))}</span></div>
-      <div class="stat-row"><span class="n">Cash Collected</span><span class="v">${gbp(c.cash)}</span></div>
-      <div class="stat-row"><span class="n">Revenue</span><span class="v">${gbp(c.revenue)}</span></div>
-      <div class="stat-row"><span class="n">Avg Deal Size</span><span class="v">${avgDeal !== null ? gbp(avgDeal) : '—'}</span></div>
-    </div>`;
-  }).join('')}</div>`;
-}
-
-function renderDialler(range) {
-  const recs = diallerForRange(range);
-  const sum = k => recs.reduce((s, r) => s + (r[k] || 0), 0);
-  const dials = sum('dials'), pickUps = sum('pickUps'), coldBooked = sum('coldBooked'), vslCalled = sum('vslCalled'), vslBooked = sum('vslBooked');
-  const pickupPct = dials ? (pickUps / dials) * 100 : null;
-  const coldBookingPct = dials ? (coldBooked / dials) * 100 : null;
-  const vslBookingPct = vslCalled ? (vslBooked / vslCalled) * 100 : null;
-  if (!recs.length) return '<div class="empty-state">No Dialler submissions in this period yet.</div>';
-  return `
-    <div class="hero-grid">
-      <div class="card hero-card"><div class="hero-label">Pickup %</div><div class="hero-value">${ragHtml(pickupPct, 'pickupPct', pct(pickupPct))}</div></div>
-      <div class="card hero-card"><div class="hero-label">Cold Dial → Booking %</div><div class="hero-value">${ragHtml(coldBookingPct, 'coldBookingPct', pct(coldBookingPct))}</div></div>
-      <div class="card hero-card"><div class="hero-label">VSL Applicant → Booking %</div><div class="hero-value">${ragHtml(vslBookingPct, 'vslBookingPct', pct(vslBookingPct))}</div></div>
-      <div class="card hero-card"><div class="hero-label">Total Calls Booked</div><div class="hero-value">${fmt(sum('totalCallsBooked'))}</div></div>
-    </div>
-    <div class="panel-grid">
-      <div class="card panel"><h3>Cold Funnel</h3>
-        <div class="stat-row"><span class="n">Dials Attempted</span><span class="v">${fmt(dials)}</span></div>
-        <div class="stat-row"><span class="n">Pick Ups</span><span class="v">${fmt(pickUps)}</span></div>
-        <div class="stat-row"><span class="n">Voicemails Left</span><span class="v">${fmt(sum('voicemails'))}</span></div>
-        <div class="stat-row"><span class="n">No Answers</span><span class="v">${fmt(sum('noAnswers'))}</span></div>
-        <div class="stat-row"><span class="n">1st Dial Complete</span><span class="v">${fmt(sum('cold1st'))}</span></div>
-        <div class="stat-row"><span class="n">2nd Dial Complete</span><span class="v">${fmt(sum('cold2nd'))}</span></div>
-        <div class="stat-row"><span class="n">Not Interested / Unqualified</span><span class="v">${fmt(sum('coldNotInterested'))}</span></div>
-        <div class="stat-row"><span class="n">Cold Leads Booked</span><span class="v">${fmt(coldBooked)}</span></div>
-      </div>
-      <div class="card panel"><h3>VSL Funnel</h3>
-        <div class="stat-row"><span class="n">VSL Applicants Called</span><span class="v">${fmt(vslCalled)}</span></div>
-        <div class="stat-row"><span class="n">Confirmed Unqualified</span><span class="v">${fmt(sum('vslUnqualified'))}</span></div>
-        <div class="stat-row"><span class="n">1st Dial Missed</span><span class="v">${fmt(sum('vsl1stMissed'))}</span></div>
-        <div class="stat-row"><span class="n">2nd Dial Missed</span><span class="v">${fmt(sum('vsl2ndMissed'))}</span></div>
-        <div class="stat-row"><span class="n">VSL Applicants Booked</span><span class="v">${fmt(vslBooked)}</span></div>
-        <div class="stat-row"><span class="n">WhatsApp Groups Created</span><span class="v">${fmt(sum('whatsappGroups'))}</span></div>
-        <div class="stat-row"><span class="n">No-Shows Rebooked</span><span class="v">${fmt(sum('noShowsRebooked'))}</span></div>
-      </div>
-    </div>`;
-}
-
-function renderCalendlyTable(view, range) {
-  const recs = calendlyForView(view, range);
-  if (!recs.length) return '<div class="empty-state">No Calendly bookings matched to this scope/period.</div>';
-  const bySource = {};
-  recs.forEach(c => { bySource[c.sourceLabel] = (bySource[c.sourceLabel] || 0) + 1; });
-  const rows = Object.entries(bySource).sort((a, b) => b[1] - a[1]);
-  return `<table><thead><tr><th>Source</th><th>Bookings</th></tr></thead><tbody>${rows.map(([s, c]) => `<tr><td>${s}</td><td class="num">${c}</td></tr>`).join('')}</tbody></table>`;
-}
-
-function renderFunnelCard(t) {
-  const showPct = t.booked ? (t.callsTaken / t.booked) * 100 : null;
-  const closePct = t.callsTaken ? (t.callsClosed / t.callsTaken) * 100 : null;
-  return `<div class="card funnel-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0;">Funnel — Booked → Taken → Closed</h3>
-    <div class="chips">
-      <div class="chip-stat"><div class="lbl">Booked</div><div class="val">${fmt(t.booked)}</div></div>
-      <div class="chip-stat"><div class="lbl">Taken</div><div class="val">${fmt(t.callsTaken)}</div></div>
-      <div class="chip-stat"><div class="lbl">Show %</div><div class="val">${ragHtml(showPct, 'showPct', pct(showPct))}</div></div>
-      <div class="chip-stat"><div class="lbl">Closed</div><div class="val">${fmt(t.callsClosed)}</div></div>
-      <div class="chip-stat"><div class="lbl">Close %</div><div class="val">${ragHtml(closePct, 'closePct', pct(closePct))}</div></div>
-    </div></div>`;
-}
-
-function renderAdSpendCard(t, view) {
-  if (!state.adSpend.connected) return '<div class="card adspend-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0 0 6px;">Ad Spend</h3><div class="not-connected">Meta Ads not connected — set META_ACCESS_TOKEN to enable ROAS &amp; cost-per-X metrics.</div></div>';
-  const spend = adSpendForView(view) || 0;
-  const costBooked = t.booked ? spend / t.booked : null;
-  const costTaken = t.callsTaken ? spend / t.callsTaken : null;
-  const costClose = t.callsClosed ? spend / t.callsClosed : null;
-  const revRoas = spend ? t.revenue / spend : null;
-  return `<div class="card adspend-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0;">Ad Spend</h3>
-    <div class="adspend-grid">
-      <div class="chip-stat"><div class="lbl">Spend</div><div class="val">${gbp(spend)}</div></div>
-      <div class="chip-stat"><div class="lbl">Cost / Booked</div><div class="val">${costBooked !== null ? gbp(costBooked) : '—'}</div></div>
-      <div class="chip-stat"><div class="lbl">Cost / Taken</div><div class="val">${costTaken !== null ? gbp(costTaken) : '—'}</div></div>
-      <div class="chip-stat"><div class="lbl">Cost / Close</div><div class="val">${costClose !== null ? gbp(costClose) : '—'}</div></div>
-      <div class="chip-stat"><div class="lbl">Revenue</div><div class="val">${gbp(t.revenue)}</div></div>
-      <div class="chip-stat"><div class="lbl">ROAS</div><div class="val">${spend ? roas(revRoas) : '—'}</div></div>
-    </div></div>`;
-}
-
 function drawLineChart(canvas, buckets, series, colors, labels) {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
@@ -794,29 +592,230 @@ function drawLineChart(canvas, buckets, series, colors, labels) {
   ctx.textAlign = 'left'; let lx = pad.left;
   labels.forEach((label, i) => { ctx.fillStyle = colors[i]; ctx.fillText('● ' + label, lx, 12); lx += label.length * 5.8 + 22; });
 }
-
-function bucketSum(recs, buckets, fn) { return buckets.map(b => recs.filter(r => inRange(r.date, b.start, b.end)).reduce((s, r) => s + fn(r), 0)); }
-
-function renderTrends(recs, range) {
-  if (daysBetween(range.start, range.end) < 2) return '';
-  const buckets = buildBuckets(range.start, range.end);
-  return `
-    <div class="panel-grid">
-      <div class="card panel"><h3>Revenue &amp; Cash <span class="hint">by day</span></h3><canvas id="chartRevCash" height="200"></canvas></div>
-      <div class="card panel"><h3>Calls: Booked / Taken / Closed <span class="hint">by day</span></h3><canvas id="chartCalls" height="200"></canvas></div>
-    </div>
-    <div class="panel-grid">
-      <div class="card panel" style="grid-column:1 / -1;"><h3>DMs &amp; Conversations <span class="hint">by day</span></h3><canvas id="chartDms" height="200"></canvas></div>
-    </div>
-  `;
+function bucketSum(rows, buckets, fieldKey) {
+  return buckets.map(b => rows.filter(r => inRange(r.date, b.start, b.end)).reduce((s, r) => s + (num(r.fields[fieldKey]) || 0), 0));
 }
-function paintTrendCharts(recs, buckets) {
-  const revEl = document.getElementById('chartRevCash'); if (!revEl) return;
-  drawLineChart(revEl, buckets, [bucketSum(recs, buckets, r => r.revenue), bucketSum(recs, buckets, r => r.cashCollected)], ['#ffffff', '#adadad'], ['Revenue', 'Cash']);
-  drawLineChart(document.getElementById('chartCalls'), buckets, [
-    bucketSum(recs, buckets, r => r.unqBooked + r.qlBooked), bucketSum(recs, buckets, r => r.callsTaken), bucketSum(recs, buckets, r => r.callsClosed),
+function bucketCountTrue(rows, buckets, predicate) {
+  return buckets.map(b => rows.filter(r => inRange(r.date, b.start, b.end) && predicate(r)).length);
+}
+
+/* ============================================================
+   RENDER — Setter Activity (DM Setter EOD)
+   ============================================================ */
+function renderSetters(range) {
+  const rows = inRangeRows(state.dmSetterEod, range);
+  const totals = sumFields(rows, DM_SETTER_FIELDS);
+  document.getElementById('heroGrid').innerHTML = DM_SETTER_FIELDS.map(f => heroCard(f.label, fieldFmt(totals, f))).join('');
+
+  if (!rows.length) return '<div class="empty-state">No DM Setter EOD submissions in this period.</div>';
+  const people = byPersonAgg(rows, DM_SETTER_FIELDS);
+  const cards = `<div class="person-grid">${people.map(p => personCard(p.person, rows, p.sums, DM_SETTER_FIELDS, 'blue')).join('')}</div>`;
+
+  const buckets = buildBuckets(range.start, range.end);
+  let trend = '';
+  if (daysBetween(range.start, range.end) >= 2) {
+    trend = `<div class="section-h">Trend</div><div class="panel-grid">
+      <div class="card panel"><h3>Outbounds &amp; Follow-ups <span class="hint">by day</span></h3><canvas id="chartSetterActivity" height="200"></canvas></div>
+      <div class="card panel"><h3>Calls Pitched &amp; Booked <span class="hint">by day</span></h3><canvas id="chartSetterOutcomes" height="200"></canvas></div>
+    </div>`;
+  }
+  return `<div class="section-h">By Setter</div>${cards}${trend}`;
+}
+function paintSetterCharts(rows, buckets) {
+  const el = document.getElementById('chartSetterActivity'); if (!el) return;
+  drawLineChart(el, buckets, [bucketSum(rows, buckets, 'New Outbounds'), bucketSum(rows, buckets, 'Follow-ups')], ['#6b6b6b', '#ffffff'], ['Outbounds', 'Follow-ups']);
+  drawLineChart(document.getElementById('chartSetterOutcomes'), buckets, [bucketSum(rows, buckets, 'Calls Pitched'), bucketSum(rows, buckets, 'Calls Booked')], ['#d9d9d9', '#ffffff'], ['Pitched', 'Booked']);
+}
+
+/* ============================================================
+   RENDER — Closer Activity (Closer EOD + SRF funnel flags)
+   ============================================================ */
+function renderClosers(range) {
+  const eodRows = inRangeRows(state.closerEod, range);
+  const srfRows = inRangeRows(state.srf, range);
+  const totals = sumFields(eodRows, CLOSER_FIELDS);
+  const showed = srfRows.filter(r => r.showed).length;
+  const closed = srfRows.filter(r => r.closed).length;
+  const disqualified = srfRows.filter(r => r.disqualified).length;
+  const callsTaken = fieldValue(totals, CLOSER_FIELDS[2]);
+  const callsClosed = fieldValue(totals, CLOSER_FIELDS[3]);
+  const showPct = callsTaken ? (showed / callsTaken) * 100 : null;
+  const closePct = callsTaken ? (callsClosed / callsTaken) * 100 : null;
+
+  document.getElementById('heroGrid').innerHTML = [
+    heroCard('Cash Collected', fieldFmt(totals, CLOSER_FIELDS[0])),
+    heroCard('Revenue Generated', fieldFmt(totals, CLOSER_FIELDS[1])),
+    heroCard('Calls Taken', fieldFmt(totals, CLOSER_FIELDS[2])),
+    heroCard('Showed (SRF)', fmt(showed), 'showPct', showPct),
+    heroCard('Calls Closed', fieldFmt(totals, CLOSER_FIELDS[3]), 'closePct', closePct),
+    heroCard('Disqualified (SRF)', fmt(disqualified)),
+  ].join('');
+
+  if (!eodRows.length && !srfRows.length) return '<div class="empty-state">No Closer EOD or SRF activity in this period.</div>';
+
+  const people = byPersonAgg(eodRows, CLOSER_FIELDS);
+  const cards = `<div class="person-grid">${people.map(p => {
+    const srfForPerson = srfRows.filter(r => r.person === p.person);
+    const pShowed = srfForPerson.filter(r => r.showed).length;
+    const pClosed = srfForPerson.filter(r => r.closed).length;
+    const pDisq = srfForPerson.filter(r => r.disqualified).length;
+    const rows = CLOSER_FIELDS.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(p.sums, f)}</span></div>`).join('');
+    return `<div class="card person-card"><div class="head">${p.person}</div>${rows}
+      <div class="stat-row"><span class="n">Showed (SRF)</span><span class="v">${fmt(pShowed)}</span></div>
+      <div class="stat-row"><span class="n">Closed (SRF)</span><span class="v">${fmt(pClosed)}</span></div>
+      <div class="stat-row"><span class="n">Disqualified (SRF)</span><span class="v">${fmt(pDisq)}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+
+  let trend = '';
+  if (daysBetween(range.start, range.end) >= 2) {
+    const buckets = buildBuckets(range.start, range.end);
+    trend = `<div class="section-h">Trend</div><div class="panel-grid">
+      <div class="card panel"><h3>Revenue &amp; Cash <span class="hint">by day</span></h3><canvas id="chartCloserRevCash" height="200"></canvas></div>
+      <div class="card panel"><h3>Taken / Closed <span class="hint">by day</span></h3><canvas id="chartCloserCalls" height="200"></canvas></div>
+    </div>`;
+  }
+  return `<div class="section-h">By Closer</div>${cards}${trend}`;
+}
+function paintCloserCharts(rows, buckets) {
+  const el = document.getElementById('chartCloserRevCash'); if (!el) return;
+  drawLineChart(el, buckets, [bucketSum(rows, buckets, 'Revenue Generated'), bucketSum(rows, buckets, 'Cash Collected ')], ['#ffffff', '#adadad'], ['Revenue', 'Cash']);
+  drawLineChart(document.getElementById('chartCloserCalls'), buckets, [bucketSum(rows, buckets, 'Calls Taken'), bucketSum(rows, buckets, 'Calls Closed')], ['#d9d9d9', '#ffffff'], ['Taken', 'Closed']);
+}
+
+/* ============================================================
+   RENDER — SDR / Webinar Activity
+   ============================================================ */
+function renderSdr(range) {
+  const rows = inRangeRows(state.sdrEod, range);
+  const totals = sumFields(rows, SDR_FIELDS);
+  const totalDialsAttempted = ['Pre-Webinar Outbound Dials Attempted', '"Show NOT booked" dials attempted', '"No Show Webby" Outbound Dial Attempts', '"Replay Watched" Outbound Dials Attempted']
+    .reduce((s, k) => s + (totals[k] || 0), 0);
+  const totalConnects = ['Pre-Webinar Outbound Dials Conversations', '"Show NOT booked" calls connected', '"No Show Webby" Outbound Dials Connected', '"Replay Watched" Outbound Dials Connected']
+    .reduce((s, k) => s + (totals[k] || 0), 0);
+  const totalAppts = ['"Show NOT booked" appointments set', '"Replay Watched" Appointments Set'].reduce((s, k) => s + (totals[k] || 0), 0);
+
+  document.getElementById('heroGrid').innerHTML = [
+    heroCard('Total Dial Attempts', fmt(totalDialsAttempted)),
+    heroCard('Total Connects', fmt(totalConnects)),
+    heroCard('Total Appts Set', fmt(totalAppts)),
+    heroCard('Triages Attempted', fmt(totals['Triages Attempted'])),
+    heroCard('Triages Connected', fmt(totals['Triages Connected (Made)'])),
+  ].join('');
+
+  if (!rows.length) return '<div class="empty-state">No SDR EOD submissions in this period.</div>';
+  const people = byPersonAgg(rows, SDR_FIELDS);
+  const cards = `<div class="person-grid">${people.map(p => {
+    const body = SDR_FUNNELS.map(funnel => `<div class="substat-label">${funnel.label}</div>${funnel.fields.map(f => `<div class="stat-row"><span class="n">${f.label}</span><span class="v">${fieldFmt(p.sums, f)}</span></div>`).join('')}`).join('');
+    return `<div class="card person-card pink"><div class="head">${p.person}</div>${body}</div>`;
+  }).join('')}</div>`;
+
+  let trend = '';
+  if (daysBetween(range.start, range.end) >= 2) {
+    trend = `<div class="section-h">Trend</div><div class="panel-grid">
+      <div class="card panel" style="grid-column:1 / -1;"><h3>Dial Attempts vs Appointments Set <span class="hint">by day</span></h3><canvas id="chartSdrTrend" height="200"></canvas></div>
+    </div>`;
+  }
+  return `<div class="section-h">By SDR</div>${cards}${trend}`;
+}
+function paintSdrCharts(rows, buckets) {
+  const el = document.getElementById('chartSdrTrend'); if (!el) return;
+  const dialKeys = ['Pre-Webinar Outbound Dials Attempted', '"Show NOT booked" dials attempted', '"No Show Webby" Outbound Dial Attempts', '"Replay Watched" Outbound Dials Attempted'];
+  const apptKeys = ['"Show NOT booked" appointments set', '"Replay Watched" Appointments Set'];
+  const dialSeries = buckets.map(b => rows.filter(r => inRange(r.date, b.start, b.end)).reduce((s, r) => s + dialKeys.reduce((s2, k) => s2 + (num(r.fields[k]) || 0), 0), 0));
+  const apptSeries = buckets.map(b => rows.filter(r => inRange(r.date, b.start, b.end)).reduce((s, r) => s + apptKeys.reduce((s2, k) => s2 + (num(r.fields[k]) || 0), 0), 0));
+  drawLineChart(el, buckets, [dialSeries, apptSeries], ['#6b6b6b', '#ffffff'], ['Dial Attempts', 'Appts Set']);
+}
+
+/* ============================================================
+   RENDER — Overview
+   ============================================================ */
+function renderCalendlyTable(range) {
+  const recs = state.calendly.filter(c => inRange(c.date, range.start, range.end));
+  if (!recs.length) return '<div class="empty-state">No Calendly bookings in this period.</div>';
+  const bySource = {};
+  recs.forEach(c => { bySource[c.eventType] = (bySource[c.eventType] || 0) + 1; });
+  const rows = Object.entries(bySource).sort((a, b) => b[1] - a[1]);
+  return `<table><thead><tr><th>Event Type</th><th>Bookings</th></tr></thead><tbody>${rows.map(([s, c]) => `<tr><td>${s}</td><td class="num">${c}</td></tr>`).join('')}</tbody></table>`;
+}
+function renderAdSpendCard(range, revenue, booked, closed) {
+  if (!state.adSpend.connected) return '<div class="card adspend-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0 0 6px;">Ad Spend</h3><div class="not-connected">Meta Ads not connected — set META_ACCESS_TOKEN to enable ROAS &amp; cost-per-X metrics.</div></div>';
+  const spend = state.adSpend.daily.filter(d => inRange(d.date, range.start, range.end)).reduce((s, d) => s + d.spend, 0);
+  const costBooked = booked ? spend / booked : null;
+  const costClose = closed ? spend / closed : null;
+  const revRoas = spend ? revenue / spend : null;
+  return `<div class="card adspend-card"><h3 style="font-family:var(--font-heading);font-size:14px;margin:0;">Ad Spend</h3>
+    <div class="adspend-grid">
+      <div class="chip-stat"><div class="lbl">Spend</div><div class="val">${gbp(spend)}</div></div>
+      <div class="chip-stat"><div class="lbl">Cost / Booked</div><div class="val">${costBooked !== null ? gbp(costBooked) : '—'}</div></div>
+      <div class="chip-stat"><div class="lbl">Cost / Close</div><div class="val">${costClose !== null ? gbp(costClose) : '—'}</div></div>
+      <div class="chip-stat"><div class="lbl">Revenue</div><div class="val">${gbp(revenue)}</div></div>
+      <div class="chip-stat"><div class="lbl">ROAS</div><div class="val">${spend ? roas(revRoas) : '—'}</div></div>
+    </div></div>`;
+}
+function renderOverview(range) {
+  const setterRows = inRangeRows(state.dmSetterEod, range);
+  const closerRows = inRangeRows(state.closerEod, range);
+  const srfRows = inRangeRows(state.srf, range);
+  const sdrRows = inRangeRows(state.sdrEod, range);
+
+  const setterTotals = sumFields(setterRows, DM_SETTER_FIELDS);
+  const closerTotals = sumFields(closerRows, CLOSER_FIELDS);
+  const showed = srfRows.filter(r => r.showed).length;
+  const closed = srfRows.filter(r => r.closed).length;
+  const callsTaken = fieldValue(closerTotals, CLOSER_FIELDS[2]);
+  const revenue = fieldValue(closerTotals, CLOSER_FIELDS[1]);
+  const booked = fieldValue(setterTotals, DM_SETTER_FIELDS[4]);
+  const showPct = callsTaken ? (showed / callsTaken) * 100 : null;
+  const closePct = callsTaken ? (closed / callsTaken) * 100 : null;
+
+  document.getElementById('heroGrid').innerHTML = [
+    heroCard('DMs Sent (Outbound)', fmt(fieldValue(setterTotals, DM_SETTER_FIELDS[1]))),
+    heroCard('Calls Booked', fmt(booked)),
+    heroCard('Calls Taken', fmt(callsTaken)),
+    heroCard('Show %', pct(showPct), 'showPct', showPct),
+    heroCard('Calls Closed', fmt(closed), 'closePct', closePct),
+    heroCard('Cash Collected', fieldFmt(closerTotals, CLOSER_FIELDS[0])),
+    heroCard('Revenue Generated', gbp(revenue)),
+  ].join('');
+
+  let body = '';
+  body += `<div class="section-h">Funnel — Booked → Taken → Showed → Closed</div>
+    <div class="card funnel-card"><div class="chips">
+      <div class="chip-stat"><div class="lbl">Booked</div><div class="val">${fmt(booked)}</div></div>
+      <div class="chip-stat"><div class="lbl">Taken</div><div class="val">${fmt(callsTaken)}</div></div>
+      <div class="chip-stat"><div class="lbl">Showed</div><div class="val">${ragHtml(showPct, 'showPct', fmt(showed))}</div></div>
+      <div class="chip-stat"><div class="lbl">Closed</div><div class="val">${ragHtml(closePct, 'closePct', fmt(closed))}</div></div>
+    </div></div>`;
+
+  body += `<div class="section-h">Webinar (SDR) Summary <span class="hint">see SDR Activity for the full breakdown</span></div>
+    <div class="hero-grid">
+      <div class="card hero-card"><div class="hero-label">Triages Attempted</div><div class="hero-value">${fmt(sumFields(sdrRows, SDR_FIELDS)['Triages Attempted'])}</div></div>
+      <div class="card hero-card"><div class="hero-label">Triages Connected</div><div class="hero-value">${fmt(sumFields(sdrRows, SDR_FIELDS)['Triages Connected (Made)'])}</div></div>
+    </div>`;
+
+  body += `<div class="section-h">Calendly Bookings <span class="hint">by event type</span></div>${renderCalendlyTable(range)}`;
+  body += `<div class="section-h">Ad Spend</div>${renderAdSpendCard(range, revenue, booked, closed)}`;
+
+  if (daysBetween(range.start, range.end) >= 2) {
+    body += `<div class="section-h">Trend</div><div class="panel-grid">
+      <div class="card panel"><h3>Revenue &amp; Cash <span class="hint">by day</span></h3><canvas id="chartOverviewRevCash" height="200"></canvas></div>
+      <div class="card panel"><h3>Booked / Taken / Closed <span class="hint">by day</span></h3><canvas id="chartOverviewFunnel" height="200"></canvas></div>
+    </div>`;
+  }
+  return body;
+}
+function paintOverviewCharts(range, buckets) {
+  const el = document.getElementById('chartOverviewRevCash'); if (!el) return;
+  const closerRows = inRangeRows(state.closerEod, range);
+  const setterRows = inRangeRows(state.dmSetterEod, range);
+  const srfRows = inRangeRows(state.srf, range);
+  drawLineChart(el, buckets, [bucketSum(closerRows, buckets, 'Revenue Generated'), bucketSum(closerRows, buckets, 'Cash Collected ')], ['#ffffff', '#adadad'], ['Revenue', 'Cash']);
+  drawLineChart(document.getElementById('chartOverviewFunnel'), buckets, [
+    bucketSum(setterRows, buckets, 'Calls Booked'),
+    bucketSum(closerRows, buckets, 'Calls Taken'),
+    bucketCountTrue(srfRows, buckets, r => r.closed),
   ], ['#6b6b6b', '#d9d9d9', '#ffffff'], ['Booked', 'Taken', 'Closed']);
-  drawLineChart(document.getElementById('chartDms'), buckets, [bucketSum(recs, buckets, r => r.dms), bucketSum(recs, buckets, r => r.convos)], ['#6b6b6b', '#ffffff'], ['DMs', 'Convos']);
 }
 
 /* ============================================================
@@ -825,33 +824,28 @@ function paintTrendCharts(recs, buckets) {
 function render() {
   buildNav();
   buildPeriodBar();
-  const view = currentView();
+  const view = VIEWS.find(v => v.key === state.viewKey) || VIEWS[0];
   const range = currentRange();
   document.getElementById('rangeCaption').textContent = rangeLabel(range.start, range.end);
   document.getElementById('viewTitle').textContent = view.label;
   document.getElementById('viewSub').textContent = state.period === 'Day' || state.period === 'Month' ? (state.selDay || state.selMonth || '') : rangeLabel(range.start, range.end);
 
-  const recs = filterRows(state.rows, view, range);
-  const t = totals(recs);
-  const spend = adSpendForView(view);
-  renderHero(t, spend);
-
   let body = '';
-  body += `<div class="section-h">By Setter</div>${renderByPerson(recs, view)}`;
-  const closerBody = renderByCloser(recs);
-  if (!closerBody.includes('No closing activity')) body += `<div class="section-h">By Closer</div>${closerBody}`;
-  if (view.showDialler) body += `<div class="section-h">Dialler Activity</div>${renderDialler(range)}`;
-  body += `<div class="section-h">Calendly Bookings <span class="hint">by source — separate from the Calls Booked figure above</span></div>${renderCalendlyTable(view, range)}`;
-  body += `<div class="section-h">Funnel</div>${renderFunnelCard(t)}`;
-  body += renderAdSpendCard(t, view);
-  const trendHtml = renderTrends(recs, range);
-  if (trendHtml) body += `<div class="section-h">Trend</div>${trendHtml}`;
+  if (view.key === 'overview') body = renderOverview(range);
+  else if (view.key === 'setters') body = renderSetters(range);
+  else if (view.key === 'closers') body = renderClosers(range);
+  else if (view.key === 'sdr') body = renderSdr(range);
 
   document.getElementById('viewBody').innerHTML = body;
 
-  if (trendHtml) paintTrendCharts(recs, buildBuckets(range.start, range.end));
+  const buckets = buildBuckets(range.start, range.end);
+  if (view.key === 'overview') paintOverviewCharts(range, buckets);
+  else if (view.key === 'setters') paintSetterCharts(inRangeRows(state.dmSetterEod, range), buckets);
+  else if (view.key === 'closers') paintCloserCharts(inRangeRows(state.closerEod, range), buckets);
+  else if (view.key === 'sdr') paintSdrCharts(inRangeRows(state.sdrEod, range), buckets);
 
-  document.getElementById('footer').textContent = `${state.rows.length} stream-rows · ${state.dialler.length} dialler submissions · ${state.calendly.length} Calendly bookings · last synced ${state.fetchedAt ? state.fetchedAt.toLocaleTimeString() : '—'}`;
+  const totalRows = state.dmSetterEod.length + state.sdrEod.length + state.closerEod.length + state.srf.length;
+  document.getElementById('footer').textContent = `${totalRows} EOD submissions · ${state.srf.length} SRF deals · ${state.calendly.length} Calendly bookings · last synced ${state.fetchedAt ? state.fetchedAt.toLocaleTimeString() : '—'}`;
 }
 
 window.addEventListener('resize', () => render());

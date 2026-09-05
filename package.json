@@ -2,7 +2,7 @@
   "name": "jl-setters-kpi-dashboard",
   "private": true,
   "version": "1.0.0",
-  "description": "Live setter KPI dashboard for JL Setters, backed by Google Sheets.",
+  "description": "Live setter KPI dashboard for JL Setters, backed by Airtable (Calendly bookings still come from Google Sheets).",
   "engines": {
     "node": ">=18"
   },
