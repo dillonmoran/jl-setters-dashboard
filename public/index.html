@@ -1231,17 +1231,6 @@ function renderOverview(range) {
       <div class="chip-stat"><div class="lbl">Total Booked</div><div class="val">${fmt(booked)}</div></div>
     </div></div>`;
 
-  const legacyDiallerRows = legacy ? state.legacyDialler.filter(r => inRange(r.date, legacy.start, legacy.end)) : [];
-  const currentSdrRows = current ? inRangeRows(state.sdrEod, current) : [];
-  body += `<div class="section-h">Webinar Summary <span class="hint">see SDR Activity for the full breakdown</span></div><div class="hero-grid">`;
-  if (legacy) body += `<div class="card hero-card"><div class="hero-label">Historical Total Calls Booked</div><div class="hero-value">${fmt(legacyDiallerRows.reduce((s, r) => s + (r.totalCallsBooked || 0), 0))}</div></div>`;
-  if (current) {
-    const sdrT = sumFields(currentSdrRows, SDR_FIELDS);
-    body += `<div class="card hero-card"><div class="hero-label">Triages Attempted</div><div class="hero-value">${fmt(sdrT['Triages Attempted'])}</div></div>
-      <div class="card hero-card"><div class="hero-label">Triages Connected</div><div class="hero-value">${fmt(sdrT['Triages Connected (Made)'])}</div></div>`;
-  }
-  body += `</div>`;
-
   body += `<div class="section-h">Calendly Bookings <span class="hint">by event type — from 1 Sept 2026 these all feed Calls Booked above, split into the two funnels shown below</span></div>${renderCalendlyTable(range)}`;
   body += `<div class="section-h">Ad Spend</div>${renderAdSpendCard(range, revenue, booked, closed)}`;
 
