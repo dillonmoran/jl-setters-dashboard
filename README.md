@@ -65,11 +65,12 @@ up later, add it to that array — no other code change needed. Note this is
 Overview-only: it isn't attributed to any DM Setter, so it deliberately doesn't
 appear in DM Setter Activity's per-rep Calls Booked numbers.
 
-There's currently no automated capture of these bookings beyond the raw
-Calendly export — the Discord notification some of them fire into isn't parsed
-anywhere. A Zapier zap connecting Calendly's webinar event type directly to
-Airtable (bypassing Discord, which is just a notification, not a record) would
-be a more robust long-term source than relying on this Calendly sheet.
+These bookings land in the same Calendly response sheet
+(`1Nh7WHYMd2QEJrvVNJ-aTOQxXUufbjkJ-Z2Hoo8ZFKxg`, `SHEET_SOURCES.calendly` in
+`api/data.js`) as every other event type already pulled into the dashboard, via
+whatever sync already populates that sheet — so no new automation is needed to
+count them; the Discord notification is just a heads-up to the team, not the
+system of record.
 
 ## Roster — who shows up where
 
