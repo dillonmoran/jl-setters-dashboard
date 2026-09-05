@@ -51,19 +51,43 @@ unrelated to the Sheets→Airtable migration and span all time unchanged, shown 
 the Overview only — **except** the webinar-booking event type, which is folded
 into Overview's "Calls Booked" (see below).
 
-## Webinar-sourced bookings (Calendly, no DM Setter)
+## Calls Booked — split by funnel (Calendly-derived, current era)
 
-Some calls are booked directly by webinar attendees on Calendly, with no DM
-Setter involved — so they never show up in DM Setter EOD's "Calls Booked"
-field, which undercounts Calls Booked relative to Calls Taken (closers do take
-these calls; nobody logs them as booked anywhere else). `WEBINAR_CALENDLY_EVENT_TYPES`
-in `public/index.html` (currently just `"JL Setters Strategy Call"`, confirmed
-with Dillon) is folded into Overview's Calls Booked total and funnel, with a
-hint on both the funnel and the Calendly Bookings table explaining the overlap
-so it doesn't read as a duplicate. If another webinar-booking event type shows
-up later, add it to that array — no other code change needed. Note this is
-Overview-only: it isn't attributed to any DM Setter, so it deliberately doesn't
-appear in DM Setter Activity's per-rep Calls Booked numbers.
+Overview's Calls Booked splits into two funnels using **Calendly event type
+alone** as the classifier: `WEBINAR_CALENDLY_EVENT_TYPES` in
+`public/index.html` (currently just `"JL Setters Strategy Call"`, confirmed
+with Dillon) is the Webinar funnel; every other Calendly event type in the
+selected range counts as the DM Setter (Outbound) funnel. Shown as its own
+"Calls Booked — by Funnel" card on Overview, plus a hint on the Calendly
+Bookings table explaining the split.
+
+For the **current era (from 1 Sept 2026)**, both funnel numbers — and
+therefore the overall Calls Booked total — now come entirely from
+deduplicated Calendly bookings, **not** from DM Setter EOD's self-reported
+"Calls Booked" field. That field is what originally undercounted Calls Booked
+relative to Calls Taken (see the "September cutover" history above) — webinar
+attendees were never going to show up in a DM Setter's own form since no
+Setter is involved, but it turned out plenty of ordinary Discovery Call
+bookings weren't reliably logged there either. Calendly is the one place every
+real booking actually lands, so it's the more complete source of truth. DM
+Setter Activity's own per-rep Calls Booked numbers are unaffected by this —
+Calendly bookings aren't attributed to a specific rep, so that view still
+reads directly from each setter's own EOD submission.
+
+The **legacy era (through 31 Aug 2026)** deliberately keeps using the old
+Blue/Pink sheet's own booking columns for the DM/Outbound side, rather than
+switching those months over to Calendly counting too — that's already what
+Setter Activity's historical section shows, and Calendly booking volume for
+that period is an untested comparison not worth introducing retroactively.
+The Webinar/Strategy-Call number, however, already came from Calendly and
+applies across both eras unchanged.
+
+These bookings land in the same Calendly response sheet
+(`1Nh7WHYMd2QEJrvVNJ-aTOQxXUufbjkJ-Z2Hoo8ZFKxg`, `SHEET_SOURCES.calendly` in
+`api/data.js`) as every other event type already pulled into the dashboard, via
+whatever sync already populates that sheet — so no new automation is needed to
+count them; the Discord notification is just a heads-up to the team, not the
+system of record.
 
 These bookings land in the same Calendly response sheet
 (`1Nh7WHYMd2QEJrvVNJ-aTOQxXUufbjkJ-Z2Hoo8ZFKxg`, `SHEET_SOURCES.calendly` in

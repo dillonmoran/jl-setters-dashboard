@@ -1180,13 +1180,25 @@ function renderOverview(range) {
   const currentSetterTotals = sumFields(currentSetterRows, DM_SETTER_FIELDS);
   const currentCloserTotals = sumFields(currentCloserRows, CLOSER_FIELDS);
   const currentShowed = currentSrfRows.filter(r => r.showed).length;
-  const webinarBooked = state.calendly.filter(c => inRange(c.date, range.start, range.end) && isWebinarBooking(c.eventType)).length;
+  const calendlyInRange = state.calendly.filter(c => inRange(c.date, range.start, range.end));
+  const webinarBooked = calendlyInRange.filter(c => isWebinarBooking(c.eventType)).length;
+  // Current-era DM/outbound booked comes from Calendly too now (any event
+  // type that isn't the webinar one), not DM Setter EOD's self-reported
+  // "Calls Booked" field — that field is exactly what undercounted before
+  // (it's how Taken ended up exceeding Booked), and Calendly is the actual
+  // system every real booking lands in regardless of who books it. Legacy
+  // (pre-Sept) keeps using the old sheet's own booking columns — that's
+  // already what DM Setter Activity's historical section shows, and Calendly
+  // volume for that era is a different, untested comparison not worth
+  // introducing here.
+  const dmFunnelBookedCurrent = current ? calendlyInRange.filter(c => current && inRange(c.date, current.start, current.end) && !isWebinarBooking(c.eventType)).length : 0;
 
   // Legacy model had no separate "showed" metric — Taken doubled as Showed.
   // Combining eras additively is valid here because Booked/Taken/Cash/Revenue
   // are the same real-world concept in both systems, just different sources.
   const dmsSent = legacyT.dms + (fieldValue(currentSetterTotals, DM_SETTER_FIELDS[1]) || 0);
-  const booked = legacyT.booked + (fieldValue(currentSetterTotals, DM_SETTER_FIELDS[4]) || 0) + webinarBooked;
+  const setterBooked = legacyT.booked + dmFunnelBookedCurrent;
+  const booked = setterBooked + webinarBooked;
   const taken = legacyT.callsTaken + (fieldValue(currentCloserTotals, CLOSER_FIELDS[2]) || 0);
   const showed = legacyT.callsTaken + currentShowed;
   const closed = legacyT.callsClosed + (fieldValue(currentCloserTotals, CLOSER_FIELDS[3]) || 0);
@@ -1204,12 +1216,19 @@ function renderOverview(range) {
   let body = '';
   if (legacy && current) body += `<div class="section-h">Combined totals span both Google Sheets (through 31 Aug 2026) and Airtable (from 1 Sept 2026)</div>`;
 
-  body += `<div class="section-h">Funnel — Booked → Taken → Showed → Closed <span class="hint">Booked includes ${fmt(webinarBooked)} webinar-sourced bookings (Calendly "${WEBINAR_CALENDLY_EVENT_TYPES.join('", "')}") with no DM Setter attached</span></div>
+  body += `<div class="section-h">Funnel — Booked → Taken → Showed → Closed</div>
     <div class="card funnel-card"><div class="chips">
       <div class="chip-stat"><div class="lbl">Booked</div><div class="val">${fmt(booked)}</div></div>
       <div class="chip-stat"><div class="lbl">Taken</div><div class="val">${fmt(taken)}</div></div>
       <div class="chip-stat"><div class="lbl">Showed</div><div class="val">${ragHtml(showPct, 'showPct', fmt(showed))}</div></div>
       <div class="chip-stat"><div class="lbl">Closed</div><div class="val">${ragHtml(closePct, 'closePct', fmt(closed))}</div></div>
+    </div></div>`;
+
+  body += `<div class="section-h">Calls Booked — by Funnel <span class="hint">split by Calendly event type: "${WEBINAR_CALENDLY_EVENT_TYPES.join('", "')}" = Webinar, everything else = DM/Outbound</span></div>
+    <div class="card funnel-card"><div class="chips">
+      <div class="chip-stat"><div class="lbl">DM Setter (Outbound)</div><div class="val">${fmt(setterBooked)}</div></div>
+      <div class="chip-stat"><div class="lbl">Webinar (Calendly)</div><div class="val">${fmt(webinarBooked)}</div></div>
+      <div class="chip-stat"><div class="lbl">Total Booked</div><div class="val">${fmt(booked)}</div></div>
     </div></div>`;
 
   const legacyDiallerRows = legacy ? state.legacyDialler.filter(r => inRange(r.date, legacy.start, legacy.end)) : [];
@@ -1223,7 +1242,7 @@ function renderOverview(range) {
   }
   body += `</div>`;
 
-  body += `<div class="section-h">Calendly Bookings <span class="hint">by event type — "${WEBINAR_CALENDLY_EVENT_TYPES.join('", "')}" is counted in Calls Booked above</span></div>${renderCalendlyTable(range)}`;
+  body += `<div class="section-h">Calendly Bookings <span class="hint">by event type — from 1 Sept 2026 these all feed Calls Booked above, split into the two funnels shown below</span></div>${renderCalendlyTable(range)}`;
   body += `<div class="section-h">Ad Spend</div>${renderAdSpendCard(range, revenue, booked, closed)}`;
 
   if (daysBetween(range.start, range.end) >= 2) {
